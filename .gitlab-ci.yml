@@ -1,0 +1,21 @@
+image: golang:1.16
+
+stages:
+  - test
+
+variables:
+  GIT_SUBMODULE_STRATEGY: recursive # required for submodules
+  DEBIAN_FRONTEND: noninteractive
+
+
+cache: 
+    key: ${CI_COMMIT_REF_SLUG}
+    paths:
+      - docs/node_modules/
+      - docs/venv/
+    policy: pull-push
+
+run-tests:
+  stage: test
+  script:
+    - make test
