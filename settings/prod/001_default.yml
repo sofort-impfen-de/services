@@ -6,7 +6,7 @@ database:
 storage:
   settings_ttl_days: 60
   rpc:
-    bind_address: localhost:9999
+    bind_address: 0.0.0.0:9999
 appointments:
   root_keys:
     - type: ecdsa
@@ -22,4 +22,4 @@ appointments:
       public_key: bbbb
       purposes: [manage-mediators]
   rpc:
-    bind_address: localhost:8888
+    bind_address: 0.0.0.0:8888
