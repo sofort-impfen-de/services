@@ -38,7 +38,7 @@ build-backend-production:
   script:
     # if the commit tag does not match a semantic version number we bail out
     - if [ -n "$CI_COMMIT_TAG" ] && [[ ! "$CI_COMMIT_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then exit 1; fi;
-    - docker build -t "${IMAGE_SPACE}/services:${CI_COMMIT_SHORT_SHA}" -t "${IMAGE_SPACE}/services:latest" -t "${IMAGE_SPACE}/services:latest"
+    - docker build -t "${IMAGE_SPACE}/services:${CI_COMMIT_SHORT_SHA}" -t "${IMAGE_SPACE}/services:latest" -t "${IMAGE_SPACE}/services:latest" .
     - docker push "${IMAGE_SPACE}/services:${CI_COMMIT_SHORT_SHA}"
     - docker push "${IMAGE_SPACE}/services:latest"
     # If this is a tagged release, we tag the image with it.
