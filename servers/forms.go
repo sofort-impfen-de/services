@@ -23,13 +23,6 @@ import (
 // An ID must be between 8 and 32 bytes long
 var ID = forms.IsBytes{
 	Encoding:  "base64",
-	MinLength: 8,
+	MinLength: 32,
 	MaxLength: 32,
-}
-
-// A hash ID is always 16 bytes long
-var HashID = forms.IsBytes{
-	Encoding:  "base64",
-	MinLength: 16,
-	MaxLength: 16,
 }

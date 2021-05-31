@@ -7,10 +7,10 @@ storage:
   settings_ttl_days: 60
   rpc:
     bind_address: localhost:9999
-    tls:
-      ca_certificate_file: "$DIR/certs/root.crt"
-      certificate_file: "$DIR/certs/storage-1.crt"
-      key_file: "$DIR/certs/storage-1.key"
+    #tls:
+    #  ca_certificate_file: "$DIR/certs/root.crt"
+    #  certificate_file: "$DIR/certs/storage-1.crt"
+    #  key_file: "$DIR/certs/storage-1.key"
 appointments:
   root_keys:
     - type: ecdsa
@@ -27,7 +27,7 @@ appointments:
       purposes: [manage-mediators]
   rpc:
     bind_address: localhost:8888
-    tls:
-      ca_certificate_file: "$DIR/certs/root.crt"
-      certificate_file: "$DIR/certs/appointments-1.crt"
-      key_file: "$DIR/certs/appointments-1.key"
+    #tls:
+    #  ca_certificate_file: "$DIR/certs/root.crt"
+    #  certificate_file: "$DIR/certs/appointments-1.crt"
+    #  key_file: "$DIR/certs/appointments-1.key"

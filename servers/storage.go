@@ -46,6 +46,10 @@ func MakeStorage(settings *services.StorageSettings, db services.Database) (*Sto
 			Form:    &GetSettingsForm,
 			Handler: Storage.getSettings,
 		},
+		"deleteSettings": {
+			Form:    &DeleteSettingsForm,
+			Handler: Storage.deleteSettings,
+		},
 	}
 
 	handler, err := jsonrpc.MethodsHandler(methods)
@@ -122,6 +126,25 @@ func (c *Storage) getSettings(context *jsonrpc.Context, params *GetSettingsParam
 	} else {
 		return context.Result(EncodeSlice(data))
 	}
+}
+
+type DeleteSettingsParams struct {
+	ID []byte `json:"id"`
+}
+
+var DeleteSettingsForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "id",
+			Validators: []forms.Validator{
+				ID,
+			},
+		},
+	},
+}
+
+func (c *Storage) deleteSettings(context *jsonrpc.Context, params *GetSettingsParams) *jsonrpc.Response {
+	return context.InternalError()
 }
 
 func (c *Storage) Start() error {

@@ -17,8 +17,10 @@
 package servers
 
 import (
+	"encoding/json"
 	"github.com/kiebitz-oss/services"
 	"github.com/kiebitz-oss/services/jsonrpc"
+	"github.com/kiprotect/go-helpers/forms"
 )
 
 type Appointments struct {
@@ -34,7 +36,64 @@ func MakeAppointments(settings *services.AppointmentsSettings, db services.Datab
 		settings: settings,
 	}
 
-	methods := map[string]*jsonrpc.Method{}
+	methods := map[string]*jsonrpc.Method{
+		"confirmProvider": {
+			Form:    &ConfirmProviderForm,
+			Handler: Appointments.confirmProvider,
+		},
+		"addMediatorPublicKeys": {
+			Form:    &AddMediatorPublicKeysForm,
+			Handler: Appointments.addMediatorPublicKeys,
+		},
+		"getQueues": {
+			Form:    &GetQueuesForm,
+			Handler: Appointments.getQueues,
+		},
+		"getKeys": {
+			Form:    &GetKeysForm,
+			Handler: Appointments.getKeys,
+		},
+		"deleteData": {
+			Form:    &DeleteDataForm,
+			Handler: Appointments.deleteData,
+		},
+		"getData": {
+			Form:    &GetDataForm,
+			Handler: Appointments.getData,
+		},
+		"bulkGetData": {
+			Form:    &BulkGetDataForm,
+			Handler: Appointments.bulkGetData,
+		},
+		"bulkStoreData": {
+			Form:    &BulkStoreDataForm,
+			Handler: Appointments.bulkStoreData,
+		},
+		"storeData": {
+			Form:    &StoreDataForm,
+			Handler: Appointments.storeData,
+		},
+		"getToken": {
+			Form:    &GetTokenForm,
+			Handler: Appointments.getToken,
+		},
+		"getQueueTokens": {
+			Form:    &GetQueueTokensForm,
+			Handler: Appointments.getQueueTokens,
+		},
+		"storeProviderData": {
+			Form:    &StoreProviderDataForm,
+			Handler: Appointments.storeProviderData,
+		},
+		"markTokenAsUsed": {
+			Form:    &MarkTokenAsUsedForm,
+			Handler: Appointments.markTokenAsUsed,
+		},
+		"getPendingProviderData": {
+			Form:    &GetPendingProviderDataForm,
+			Handler: Appointments.getPendingProviderData,
+		},
+	}
 
 	handler, err := jsonrpc.MethodsHandler(methods)
 
@@ -56,4 +115,1110 @@ func (c *Appointments) Start() error {
 
 func (c *Appointments) Stop() error {
 	return c.server.Stop()
+}
+
+// Method Handlers
+
+type JSON struct{}
+
+func (j JSON) Validate(value interface{}, values map[string]interface{}) (interface{}, error) {
+	var jsonValue interface{}
+	if err := json.Unmarshal([]byte(value.(string)), &jsonValue); err != nil {
+		return nil, err
+	}
+	return jsonValue, nil
+}
+
+var ConfirmProviderForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "data",
+			Validators: []forms.Validator{
+				forms.IsString{},
+				JSON{},
+				forms.IsStringMap{
+					Form: &ConfirmProviderDataForm,
+				},
+			},
+		},
+		{
+			Name: "signature",
+			Validators: []forms.Validator{
+				forms.IsBytes{
+					Encoding:  "base64",
+					MaxLength: 1000,
+					MinLength: 50,
+				},
+			},
+		},
+		{
+			Name: "publicKey",
+			Validators: []forms.Validator{
+				forms.IsOptional{},
+				forms.IsBytes{
+					Encoding:  "base64",
+					MaxLength: 1000,
+					MinLength: 50,
+				},
+			},
+		},
+	},
+}
+
+var ECDHEncryptedDataForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "iv",
+			Validators: []forms.Validator{
+				forms.IsBytes{
+					Encoding:  "base64",
+					MinLength: 10,
+					MaxLength: 20,
+				},
+			},
+		},
+		{
+			Name: "iv",
+			Validators: []forms.Validator{
+				forms.IsBytes{
+					Encoding:  "base64",
+					MinLength: 10,
+					MaxLength: 20,
+				},
+			},
+		},
+		{
+			Name: "data",
+			Validators: []forms.Validator{
+				forms.IsBytes{
+					Encoding:  "base64",
+					MinLength: 1,
+					MaxLength: 200000,
+				},
+			},
+		},
+		{
+			Name: "publicKey",
+			Validators: []forms.Validator{
+				forms.IsBytes{
+					Encoding:  "base64",
+					MinLength: 1,
+					MaxLength: 1000,
+				},
+			},
+		},
+	},
+}
+
+var ConfirmProviderDataForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "id",
+			Validators: []forms.Validator{
+				ID,
+			},
+		},
+		{
+			Name: "providerData",
+			Validators: []forms.Validator{
+				forms.IsStringMap{
+					Form: &ECDHEncryptedDataForm,
+				},
+			},
+		},
+		{
+			Name: "keyData",
+			Validators: []forms.Validator{
+				forms.IsStringMap{
+					Form: &SignedKeyDataForm,
+				},
+			},
+		},
+	},
+}
+
+var SignedKeyDataForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "data",
+			Validators: []forms.Validator{
+				forms.IsString{},
+				JSON{},
+				forms.IsStringMap{
+					Form: &KeyDataForm,
+				},
+			},
+		},
+		{
+			Name: "signature",
+			Validators: []forms.Validator{
+				forms.IsBytes{
+					Encoding:  "base64",
+					MaxLength: 1000,
+					MinLength: 50,
+				},
+			},
+		},
+		{
+			Name: "publicKey",
+			Validators: []forms.Validator{
+				forms.IsOptional{},
+				forms.IsBytes{
+					Encoding:  "base64",
+					MaxLength: 1000,
+					MinLength: 50,
+				},
+			},
+		},
+	},
+}
+
+var KeyDataForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "signing",
+			Validators: []forms.Validator{
+				ID,
+			},
+		},
+		{
+			Name: "encryption",
+			Validators: []forms.Validator{
+				ID,
+			},
+		},
+		{
+			Name: "zipCode",
+			Validators: []forms.Validator{
+				forms.IsString{
+					MaxLength: 5,
+					MinLength: 5,
+				},
+			},
+		},
+		{
+			Name: "queues",
+			Validators: []forms.Validator{
+				forms.IsList{
+					Validators: []forms.Validator{
+						ID,
+					},
+				},
+			},
+		},
+	},
+}
+
+type ConfirmProviderParams struct {
+	Data      *ConfirmProviderData `json:"data"`
+	Signature []byte               `json:"signature"`
+	PublicKey []byte               `json:"publicKey"`
+}
+
+type ConfirmProviderData struct {
+	ID           []byte             `json:"id"`
+	ProviderData *ECDHEncryptedData `json:"providerData"`
+	KeyData      *SignedKeyData     `json:"keyData"`
+}
+
+type SignedKeyData struct {
+	Data      *KeyData `json:"data"`
+	Signature []byte   `json:"signature"`
+	PublicKey []byte   `json:"publicKey"`
+}
+
+type KeyData struct {
+	Signing    []byte   `json:"signing"`
+	Encryption []byte   `json:"encryption"`
+	ZipCode    string   `json:"zipCode"`
+	Queues     [][]byte `json:"queues"`
+}
+
+type ECDHEncryptedData struct {
+	IV        []byte `json:"iv"`
+	Data      []byte `json:"data"`
+	PublicKey []byte `json:"publicKey"`
+}
+
+// { id, key, providerData, keyData }, keyPair
+func (c *Appointments) confirmProvider(context *jsonrpc.Context, params *ConfirmProviderParams) *jsonrpc.Response {
+	return context.Acknowledge()
+}
+
+var AddMediatorPublicKeysForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "data",
+			Validators: []forms.Validator{
+				forms.IsString{},
+				JSON{},
+				forms.IsStringMap{
+					Form: &AddMediatorPublicKeysDataForm,
+				},
+			},
+		},
+		{
+			Name: "signature",
+			Validators: []forms.Validator{
+				forms.IsBytes{
+					Encoding:  "base64",
+					MaxLength: 1000,
+					MinLength: 50,
+				},
+			},
+		},
+		{
+			Name: "publicKey",
+			Validators: []forms.Validator{
+				forms.IsOptional{},
+				forms.IsBytes{
+					Encoding:  "base64",
+					MaxLength: 1000,
+					MinLength: 50,
+				},
+			},
+		},
+	},
+}
+
+var AddMediatorPublicKeysDataForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "encryption",
+			Validators: []forms.Validator{
+				ID,
+			},
+		},
+		{
+			Name: "signing",
+			Validators: []forms.Validator{
+				ID,
+			},
+		},
+	},
+}
+
+type AddMediatorPublicKeysParams struct {
+	Data      *AddMediatorPublicKeysData `json:"data"`
+	Signature []byte                     `json:"signature"`
+	PublicKey []byte                     `json:"publicKey"`
+}
+
+type AddMediatorPublicKeysData struct {
+	Encryption []byte `json:"encryption"`
+	Signing    []byte `json:"signing"`
+}
+
+// { keys }, keyPair
+// add the mediator key to the list of keys (only for testing)
+func (c *Appointments) addMediatorPublicKeys(context *jsonrpc.Context, params *AddMediatorPublicKeysParams) *jsonrpc.Response {
+	return nil
+}
+
+// public endpoints
+
+var GetQueuesForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "zipCode",
+			Validators: []forms.Validator{
+				forms.IsString{
+					MinLength: 5,
+					MaxLength: 5,
+				},
+			},
+		},
+		{
+			Name: "radius",
+			Validators: []forms.Validator{
+				forms.IsInteger{
+					HasMin: true,
+					HasMax: true,
+					Min:    0,
+					Max:    50,
+				},
+			},
+		},
+	},
+}
+
+type GetQueuesParams struct {
+	ZipCode string `json:"zipCode"`
+	Radius  int64  `json:"radius"`
+}
+
+// { zipCode, radius }
+func (c *Appointments) getQueues(context *jsonrpc.Context, params *GetQueuesParams) *jsonrpc.Response {
+	return nil
+}
+
+type GetKeysParams struct {
+}
+
+var GetKeysForm = forms.Form{
+	Fields: []forms.Field{},
+}
+
+// return all public keys present in the system
+func (c *Appointments) getKeys(context *jsonrpc.Context, params *GetKeysParams) *jsonrpc.Response {
+	return nil
+}
+
+// data endpoints
+
+var DeleteDataForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "data",
+			Validators: []forms.Validator{
+				forms.IsString{},
+				JSON{},
+				forms.IsStringMap{
+					Form: &DeleteDataDataForm,
+				},
+			},
+		},
+		{
+			Name: "signature",
+			Validators: []forms.Validator{
+				forms.IsBytes{
+					Encoding:  "base64",
+					MaxLength: 1000,
+					MinLength: 50,
+				},
+			},
+		},
+		{
+			Name: "publicKey",
+			Validators: []forms.Validator{
+				forms.IsOptional{},
+				forms.IsBytes{
+					Encoding:  "base64",
+					MaxLength: 1000,
+					MinLength: 50,
+				},
+			},
+		},
+	},
+}
+
+var DeleteDataDataForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "id",
+			Validators: []forms.Validator{
+				ID,
+			},
+		},
+	},
+}
+
+type DeleteDataParams struct {
+	Data      *DeleteDataData `json:"data"`
+	Signature []byte          `json:"signature"`
+	PublicKey []byte          `json:"publicKey"`
+}
+
+type DeleteDataData struct {
+	ID []byte `json:"id"`
+}
+
+// { id }, keyPair
+func (c *Appointments) deleteData(context *jsonrpc.Context, params *DeleteDataParams) *jsonrpc.Response {
+	return nil
+}
+
+var GetDataForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "data",
+			Validators: []forms.Validator{
+				forms.IsString{},
+				JSON{},
+				forms.IsStringMap{
+					Form: &GetDataDataForm,
+				},
+			},
+		},
+		{
+			Name: "signature",
+			Validators: []forms.Validator{
+				forms.IsBytes{
+					Encoding:  "base64",
+					MaxLength: 1000,
+					MinLength: 50,
+				},
+			},
+		},
+		{
+			Name: "publicKey",
+			Validators: []forms.Validator{
+				forms.IsOptional{},
+				forms.IsBytes{
+					Encoding:  "base64",
+					MaxLength: 1000,
+					MinLength: 50,
+				},
+			},
+		},
+	},
+}
+
+var GetDataDataForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "id",
+			Validators: []forms.Validator{
+				ID,
+			},
+		},
+	},
+}
+
+type GetDataParams struct {
+	Data      *GetDataData `json:"data"`
+	Signature []byte       `json:"signature"`
+	PublicKey []byte       `json:"publicKey"`
+}
+
+type GetDataData struct {
+	ID []byte `json:"id"`
+}
+
+// { id }, keyPair
+func (c *Appointments) getData(context *jsonrpc.Context, params *GetDataParams) *jsonrpc.Response {
+	return nil
+}
+
+var BulkGetDataForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "data",
+			Validators: []forms.Validator{
+				forms.IsString{},
+				JSON{},
+				forms.IsStringMap{
+					Form: &BulkGetDataDataForm,
+				},
+			},
+		},
+		{
+			Name: "signature",
+			Validators: []forms.Validator{
+				forms.IsBytes{
+					Encoding:  "base64",
+					MaxLength: 1000,
+					MinLength: 50,
+				},
+			},
+		},
+		{
+			Name: "publicKey",
+			Validators: []forms.Validator{
+				forms.IsOptional{},
+				forms.IsBytes{
+					Encoding:  "base64",
+					MaxLength: 1000,
+					MinLength: 50,
+				},
+			},
+		},
+	},
+}
+
+var BulkGetDataDataForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "ids",
+			Validators: []forms.Validator{
+				forms.IsList{
+					Validators: []forms.Validator{
+						ID,
+					},
+				},
+			},
+		},
+	},
+}
+
+type BulkGetDataParams struct {
+	Data      *BulkGetDataData `json:"data"`
+	Signature []byte           `json:"signature"`
+	PublicKey []byte           `json:"publicKey"`
+}
+
+type BulkGetDataData struct {
+	IDs [][]byte `json:"ids"`
+}
+
+// { ids }, keyPair
+func (c *Appointments) bulkGetData(context *jsonrpc.Context, params *BulkGetDataParams) *jsonrpc.Response {
+	return nil
+}
+
+var BulkStoreDataForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "data",
+			Validators: []forms.Validator{
+				forms.IsString{},
+				JSON{},
+				forms.IsStringMap{
+					Form: &BulkStoreDataDataForm,
+				},
+			},
+		},
+		{
+			Name: "signature",
+			Validators: []forms.Validator{
+				forms.IsBytes{
+					Encoding:  "base64",
+					MaxLength: 1000,
+					MinLength: 50,
+				},
+			},
+		},
+		{
+			Name: "publicKey",
+			Validators: []forms.Validator{
+				forms.IsOptional{},
+				forms.IsBytes{
+					Encoding:  "base64",
+					MaxLength: 1000,
+					MinLength: 50,
+				},
+			},
+		},
+	},
+}
+
+var BulkStoreDataDataForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "dataList",
+			Validators: []forms.Validator{
+				forms.IsList{
+					Validators: []forms.Validator{
+						forms.IsStringMap{
+							Form: &StoreDataDataForm,
+						},
+					},
+				},
+			},
+		},
+	},
+}
+
+type BulkStoreDataParams struct {
+	Data      *BulkStoreDataData `json:"data"`
+	Signature []byte             `json:"signature"`
+	PublicKey []byte             `json:"publicKey"`
+}
+
+type BulkStoreDataData struct {
+	DataList []*StoreDataData `json:"dataList"`
+}
+
+type StoreDataData struct {
+	ID          []byte        `json:"id"`
+	Data        interface{}   `json:"data"`
+	Permissions []*Permission `json:"permissions"`
+	Grant       *Grant        `json:"grant"`
+}
+
+type Permission struct {
+}
+
+type Grant struct {
+}
+
+// { dataList }, keyPair
+func (c *Appointments) bulkStoreData(context *jsonrpc.Context, params *BulkStoreDataParams) *jsonrpc.Response {
+	return nil
+}
+
+var StoreDataForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "data",
+			Validators: []forms.Validator{
+				forms.IsString{},
+				JSON{},
+				forms.IsStringMap{
+					Form: &StoreDataDataForm,
+				},
+			},
+		},
+		{
+			Name: "signature",
+			Validators: []forms.Validator{
+				forms.IsBytes{
+					Encoding:  "base64",
+					MaxLength: 1000,
+					MinLength: 50,
+				},
+			},
+		},
+		{
+			Name: "publicKey",
+			Validators: []forms.Validator{
+				forms.IsOptional{},
+				forms.IsBytes{
+					Encoding:  "base64",
+					MaxLength: 1000,
+					MinLength: 50,
+				},
+			},
+		},
+	},
+}
+
+var StoreDataDataForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "id",
+			Validators: []forms.Validator{
+				ID,
+			},
+		},
+		{
+			Name:       "data",
+			Validators: []forms.Validator{},
+		},
+		{
+			Name: "permissions",
+			Validators: []forms.Validator{
+				forms.IsList{
+					Validators: []forms.Validator{
+						forms.IsStringMap{
+							Form: &PermissionForm,
+						},
+					},
+				},
+			},
+		},
+		{
+			Name: "grant",
+			Validators: []forms.Validator{
+				forms.IsStringMap{
+					Form: &GrantForm,
+				},
+			},
+		},
+	},
+}
+
+var PermissionForm = forms.Form{
+	Fields: []forms.Field{},
+}
+
+var GrantForm = forms.Form{
+	Fields: []forms.Field{},
+}
+
+type StoreDataParams struct {
+	Data      *StoreDataData `json:"data"`
+	Signature []byte         `json:"signature"`
+	PublicKey []byte         `json:"publicKey"`
+}
+
+// { id, data, permissions, grant }, keyPair
+// store provider data for verification
+func (c *Appointments) storeData(context *jsonrpc.Context, params *StoreDataParams) *jsonrpc.Response {
+	return nil
+}
+
+// user endpoints
+
+var GetTokenForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "hash",
+			Validators: []forms.Validator{
+				ID,
+			},
+		},
+		{
+			Name: "queueID",
+			Validators: []forms.Validator{
+				ID,
+			},
+		},
+		{
+			Name: "queueData",
+			Validators: []forms.Validator{
+				forms.IsStringMap{}, // to do: better validation
+			},
+		},
+		{
+			Name: "signedTokenData",
+			Validators: []forms.Validator{
+				forms.IsStringMap{
+					Form: &SignedTokenDataForm,
+				},
+			},
+		},
+		{
+			Name: "encryptedData",
+			Validators: []forms.Validator{
+				forms.IsStringMap{
+					Form: &ECDHEncryptedDataForm,
+				},
+			},
+		},
+	},
+}
+
+var SignedTokenDataForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "data",
+			Validators: []forms.Validator{
+				forms.IsString{},
+				JSON{},
+				forms.IsStringMap{
+					Form: &TokenDataForm,
+				},
+			},
+		},
+		{
+			Name: "signature",
+			Validators: []forms.Validator{
+				forms.IsBytes{
+					Encoding:  "base64",
+					MaxLength: 1000,
+					MinLength: 50,
+				},
+			},
+		},
+		{
+			Name: "publicKey",
+			Validators: []forms.Validator{
+				forms.IsOptional{},
+				forms.IsBytes{
+					Encoding:  "base64",
+					MaxLength: 1000,
+					MinLength: 50,
+				},
+			},
+		},
+	},
+}
+
+var TokenDataForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "hash",
+			Validators: []forms.Validator{
+				ID,
+			},
+		},
+		{
+			Name: "token",
+			Validators: []forms.Validator{
+				ID,
+			},
+		},
+	},
+}
+
+type GetTokenParams struct {
+	Hash            []byte                 `json:"hash"`
+	EncryptedData   *ECDHEncryptedData     `json:"encryptedData"`
+	QueueID         []byte                 `json:"queueID"`
+	QueueData       map[string]interface{} `json:"queueData"`
+	SignedTokenData *SignedTokenData       `json:"signedTokenData"`
+}
+
+type SignedTokenData struct {
+	Data      *TokenData `json:"data"`
+	Signature []byte     `json:"signature"`
+	PublicKey []byte     `json:"publicKey"`
+}
+
+type TokenData struct {
+	Token []byte `json:"token"`
+	Hash  []byte `json:"hash"`
+}
+
+//{hash, encryptedData, queueID, queueData, signedTokenData}
+// get a token for a given queue
+func (c *Appointments) getToken(context *jsonrpc.Context, params *GetTokenParams) *jsonrpc.Response {
+	return nil
+}
+
+// provider-only endpoints
+
+var GetQueueTokensForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "data",
+			Validators: []forms.Validator{
+				forms.IsString{},
+				JSON{},
+				forms.IsStringMap{
+					Form: &GetQueueTokensDataForm,
+				},
+			},
+		},
+		{
+			Name: "signature",
+			Validators: []forms.Validator{
+				forms.IsBytes{
+					Encoding:  "base64",
+					MaxLength: 1000,
+					MinLength: 50,
+				},
+			},
+		},
+		{
+			Name: "publicKey",
+			Validators: []forms.Validator{
+				forms.IsOptional{},
+				forms.IsBytes{
+					Encoding:  "base64",
+					MaxLength: 1000,
+					MinLength: 50,
+				},
+			},
+		},
+	},
+}
+
+var GetQueueTokensDataForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "capacities",
+			Validators: []forms.Validator{
+				forms.IsList{
+					Validators: []forms.Validator{
+						forms.IsStringMap{
+							Form: &CapacityForm,
+						},
+					},
+				},
+			},
+		},
+	},
+}
+
+var CapacityForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "n",
+			Validators: []forms.Validator{
+				forms.IsInteger{
+					HasMin: true,
+					HasMax: true,
+					Min:    1,
+					Max:    100,
+				},
+			},
+		},
+		{
+			Name: "properties",
+			Validators: []forms.Validator{
+				forms.IsStringMap{},
+			},
+		},
+	},
+}
+
+type GetQueueTokensParams struct {
+	Data      *GetQueueTokensData `json:"data"`
+	Signature []byte              `json:"signature"`
+	PublicKey []byte              `json:"publicKey"`
+}
+
+type GetQueueTokensData struct {
+	Capacities []*Capacity `json:"capacities"`
+}
+
+type Capacity struct {
+	N          int64                  `json:"n"`
+	Properties map[string]interface{} `json:"properties"`
+}
+
+// { capacities }, keyPair
+// get n tokens from the given queue IDs
+func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueueTokensParams) *jsonrpc.Response {
+	return nil
+}
+
+var StoreProviderDataForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "data",
+			Validators: []forms.Validator{
+				forms.IsString{},
+				JSON{},
+				forms.IsStringMap{
+					Form: &StoreProviderDataDataForm,
+				},
+			},
+		},
+		{
+			Name: "signature",
+			Validators: []forms.Validator{
+				forms.IsBytes{
+					Encoding:  "base64",
+					MaxLength: 1000,
+					MinLength: 50,
+				},
+			},
+		},
+		{
+			Name: "publicKey",
+			Validators: []forms.Validator{
+				forms.IsOptional{},
+				forms.IsBytes{
+					Encoding:  "base64",
+					MaxLength: 1000,
+					MinLength: 50,
+				},
+			},
+		},
+	},
+}
+
+var StoreProviderDataDataForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "id",
+			Validators: []forms.Validator{
+				ID,
+			},
+		},
+		{
+			Name: "code",
+			Validators: []forms.Validator{
+				forms.IsOptional{Default: ""},
+				forms.IsString{
+					MaxLength: 32,
+				},
+			},
+		},
+		{
+			Name: "encrypteData",
+			Validators: []forms.Validator{
+				forms.IsStringMap{
+					Form: &ECDHEncryptedDataForm,
+				},
+			},
+		},
+	},
+}
+
+type StoreProviderDataParams struct {
+	Data      *StoreProviderDataData `json:"data"`
+	Signature []byte                 `json:"signature"`
+	PublicKey []byte                 `json:"publicKey"`
+}
+
+type StoreProviderDataData struct {
+	ID            []byte             `json:"id"`
+	EncryptedData *ECDHEncryptedData `json:"encryptedData"`
+	Code          string             `json:"code"`
+}
+
+// { id, encryptedData, code }, keyPair
+func (c *Appointments) storeProviderData(context *jsonrpc.Context, params *StoreProviderDataParams) *jsonrpc.Response {
+	return nil
+}
+
+var MarkTokenAsUsedForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "token",
+			Validators: []forms.Validator{
+				ID,
+			},
+		},
+		{
+			Name: "secret",
+			Validators: []forms.Validator{
+				ID,
+			},
+		},
+	},
+}
+
+type MarkTokenAsUsedParams struct {
+	Token  []byte `json:"token"`
+	Secret []byte `json:"secret"`
+}
+
+// mark a given token as used using its secret
+// { token, secret }, keyPair
+func (c *Appointments) markTokenAsUsed(context *jsonrpc.Context, params *MarkTokenAsUsedParams) *jsonrpc.Response {
+	return nil
+}
+
+var GetPendingProviderDataForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "data",
+			Validators: []forms.Validator{
+				forms.IsString{},
+				JSON{},
+				forms.IsStringMap{
+					Form: &GetPendingProviderDataDataForm,
+				},
+			},
+		},
+		{
+			Name: "signature",
+			Validators: []forms.Validator{
+				forms.IsBytes{
+					Encoding:  "base64",
+					MaxLength: 1000,
+					MinLength: 50,
+				},
+			},
+		},
+		{
+			Name: "publicKey",
+			Validators: []forms.Validator{
+				forms.IsOptional{},
+				forms.IsBytes{
+					Encoding:  "base64",
+					MaxLength: 1000,
+					MinLength: 50,
+				},
+			},
+		},
+	},
+}
+
+var GetPendingProviderDataDataForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "limit",
+			Validators: []forms.Validator{
+				forms.IsOptional{Default: 20},
+				forms.IsInteger{
+					HasMin: true,
+					HasMax: true,
+					Min:    1,
+					Max:    1000,
+				},
+			},
+		},
+	},
+}
+
+type GetPendingProviderDataParams struct {
+	Data      *GetPendingProviderDataData `json:"data"`
+	Signature []byte                      `json:"signature"`
+	PublicKey []byte                      `json:"publicKey"`
+}
+
+type GetPendingProviderDataData struct {
+	Limit int64 `json:"limit"`
+}
+
+// mediator-only endpoint
+// { limit }, keyPair
+func (c *Appointments) getPendingProviderData(context *jsonrpc.Context, params *GetPendingProviderDataParams) *jsonrpc.Response {
+	return nil
 }
