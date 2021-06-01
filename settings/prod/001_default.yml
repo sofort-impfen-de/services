@@ -1,0 +1,25 @@
+name: kiebitz
+database:
+  name: db
+  type: in-memory
+  settings: {}
+storage:
+  settings_ttl_days: 60
+  rpc:
+    bind_address: 0.0.0.0:9999
+appointments:
+  root_keys:
+    - type: ecdsa
+      format: spki
+      params:
+        curve: p-256
+      public_key: aaaa
+      purposes: [manage-provider-codes]
+    - type: ecdsa
+      format: spki
+      params:
+        curve: p-256
+      public_key: bbbb
+      purposes: [manage-mediators]
+  rpc:
+    bind_address: 0.0.0.0:8888
