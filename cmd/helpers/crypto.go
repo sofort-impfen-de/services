@@ -14,20 +14,29 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-package cmd
+package helpers
 
 import (
 	"github.com/kiebitz-oss/services"
-	"github.com/kiebitz-oss/services/cmd/helpers"
+	"github.com/urfave/cli"
 )
 
-var Commands = services.CommandsDefinitions{
-	services.CommandsDefinition{
-		Name:  "crypto",
-		Maker: helpers.Crypto,
-	},
-	services.CommandsDefinition{
-		Name:  "run",
-		Maker: helpers.Run,
-	},
+func Crypto(settings *services.Settings, db services.Database) ([]cli.Command, error) {
+
+	return []cli.Command{
+		{
+			Name:    "crypto",
+			Aliases: []string{"s"},
+			Flags:   []cli.Flag{},
+			Usage:   "Cryptographic functions.",
+			Subcommands: []cli.Command{
+				{
+					Name:   "sign",
+					Flags:  []cli.Flag{},
+					Usage:  "Sign a payload.",
+					Action: func(c *cli.Context) error { return nil },
+				},
+			},
+		},
+	}, nil
 }

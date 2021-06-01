@@ -56,6 +56,9 @@ func (c *Context) Abort() {
 }
 
 func (c *Context) AbortWithStatus(status int) {
+	if c.Aborted {
+		return
+	}
 	c.Writer.WriteHeader(status)
 	c.Abort()
 }

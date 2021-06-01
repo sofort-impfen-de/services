@@ -3,7 +3,7 @@
 
 # You can addd an entry to this list to generate a certificate for the given
 # actors.
-declare -a certs=("mediator-1" "notifier-1" "storage-1" "appointments-1")
+declare -a certs=("mediator-1" "notifier-1" "storage-1" "appointments-1" "master-1")
 declare -A groups=(["mediator-1"]="mediators" ["notifier-1"]="notifiers")
 
 O="Kiebitz"
@@ -27,6 +27,8 @@ do
 	openssl rsa -in "${cert}.key" -pubout -out "${cert}.pub";
 	openssl req -new -sha256 -key "${cert}.key" -subj "/C=${C}/ST=${ST}/L=${L}/O=${O}/OU=${OU}/CN=${cert}" -addext "subjectAltName = DNS:${cert},DNS:*.${cert}.local" -out "${cert}.csr";
 	openssl x509 -req -in "${cert}.csr" -CA root.crt -CAkey root.key -CAcreateserial -out "${cert}.crt" -extensions SAN -extfile <(printf "[SAN]\nsubjectAltName = DNS:${cert},DNS:*.${cert}.local") -days 500 -sha256;
+
+	# Elliptic curve signing & encryption certificates
 
 	openssl ecparam -genkey -name prime256v1 -noout -out "${cert}-sign.key";
 	openssl ec -in "${cert}-sign.key" -pubout -out "${cert}-sign.pub";

@@ -119,6 +119,9 @@ func MethodsHandler(methods map[string]*Method) (Handler, error) {
 						services.Log.Error(err)
 						return context.InternalError()
 					} else {
+						if response == nil {
+							return context.Nil()
+						}
 						return response
 					}
 				}

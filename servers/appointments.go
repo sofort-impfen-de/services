@@ -449,7 +449,7 @@ type GetQueuesParams struct {
 
 // { zipCode, radius }
 func (c *Appointments) getQueues(context *jsonrpc.Context, params *GetQueuesParams) *jsonrpc.Response {
-	return nil
+	return context.Acknowledge()
 }
 
 type GetKeysParams struct {
@@ -461,7 +461,7 @@ var GetKeysForm = forms.Form{
 
 // return all public keys present in the system
 func (c *Appointments) getKeys(context *jsonrpc.Context, params *GetKeysParams) *jsonrpc.Response {
-	return nil
+	return context.Acknowledge()
 }
 
 // data endpoints
