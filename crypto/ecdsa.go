@@ -61,10 +61,12 @@ func Verify(message []byte, signatureBytes []byte, publicKey *ecdsa.PublicKey) (
 		S: &big.Int{},
 	}
 
-	if len(signatureBytes) != 64 {
+	bl := publicKey.Curve.Params().BitSize / 8
 
+	if len(signatureBytes) != bl*2 {
+		return false, fmt.Errorf("expected %d bytes for signature, but got %d", bl, len(signatureBytes))
 	}
-	// numbers
+
 	sig.R.SetBytes(signatureBytes[0:32])
 	sig.S.SetBytes(signatureBytes[32:])
 
