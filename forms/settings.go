@@ -23,9 +23,15 @@ import (
 var SigningForm = forms.Form{
 	Fields: []forms.Field{
 		{
-			Name: "key_file",
+			Name: "root_keys",
 			Validators: []forms.Validator{
-				forms.IsString{},
+				forms.IsList{
+					Validators: []forms.Validator{
+						forms.IsStringMap{
+							Form: &RootKeyForm,
+						},
+					},
+				},
 			},
 		},
 	},
@@ -97,13 +103,47 @@ var RootKeyForm = forms.Form{
 		{
 			Name: "type",
 			Validators: []forms.Validator{
-				forms.IsIn{Choices: []interface{}{"ecdsa"}}, // we only support ECDSA for now
+				forms.IsIn{Choices: []interface{}{"ecdsa", "ecdh"}}, // we only support ECDSA & ECDH for now
 			},
 		},
 		{
 			Name: "format",
 			Validators: []forms.Validator{
-				forms.IsIn{Choices: []interface{}{"spki"}}, // we only support SPKI for now
+				forms.IsIn{Choices: []interface{}{"spki-pkcs8"}}, // we only support SPKI & PKCS8 for now
+			},
+		},
+		{
+			Name: "name",
+			Validators: []forms.Validator{
+				forms.IsString{},
+			},
+		},
+		{
+			Name: "purposes",
+			Validators: []forms.Validator{
+				forms.IsList{
+					Validators: []forms.Validator{
+						forms.IsString{},
+						forms.IsIn{Choices: []interface{}{"sign", "verify", "deriveKey", "encrypt", "decrypt"}},
+					},
+				},
+			},
+		},
+		{
+			Name: "public_key",
+			Validators: []forms.Validator{
+				forms.IsBytes{
+					Encoding: "base64",
+				},
+			},
+		},
+		{
+			Name: "private_key",
+			Validators: []forms.Validator{
+				forms.IsOptional{},
+				forms.IsBytes{
+					Encoding: "base64",
+				},
 			},
 		},
 		{

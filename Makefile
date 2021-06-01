@@ -32,13 +32,17 @@ clean:
 	@go clean $(GOFLAGS) -i ./...
 
 copyright:
-	python .scripts/make_copyright_headers.py
+	python3 .scripts/make_copyright_headers.py
 
 certs:
 	rm -rf settings/dev/certs/*
 	rm -rf settings/test/certs/*
 	(cd settings/dev/certs; ../../../.scripts/make_certs.sh)
 	(cd settings/test/certs; ../../../.scripts/make_certs.sh)
+	make extract-keys-for-settings
+
+extract-keys-for-settings:
+	python3 .scripts/extract_keys_for_settings.py
 
 example-data:
 	@.scripts/generate_example_data.sh

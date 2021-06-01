@@ -30,16 +30,28 @@ type AppointmentsSettings struct {
 	RootKeys []*RootKey             `json:"root_keys"`
 }
 
+func (a *AppointmentsSettings) RootKey(name string) *RootKey {
+	for _, rootKey := range a.RootKeys {
+		if rootKey.Name == name {
+			return rootKey
+		}
+	}
+	return nil
+}
+
 type RootKey struct {
+	Name      string                 `json:"name"`
 	Type      string                 `json:"type"`
 	Format    string                 `json:"format"`
 	Params    map[string]interface{} `json:"params"`
-	PublicKey string                 `json:"public_key"`
+	PublicKey []byte                 `json:"public_key"`
 	Purposes  []string               `json:"purposes"`
+	// only defined for local signing operations
+	PrivateKey []byte `json:"private_key"`
 }
 
 type SigningSettings struct {
-	KeyFile string `json:"key_file"`
+	RootKeys []*RootKey `json:"root_keys"`
 }
 
 type DatabaseSettings struct {
@@ -48,6 +60,7 @@ type DatabaseSettings struct {
 }
 
 type Settings struct {
+	Signing      *SigningSettings      `json:"signing"`
 	Definitions  *Definitions          `json:"definitions"`
 	Storage      *StorageSettings      `json:"storage"`
 	Appointments *AppointmentsSettings `json:"appointments"`
