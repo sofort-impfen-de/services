@@ -342,7 +342,7 @@ type ECDHEncryptedData struct {
 
 // { id, key, providerData, keyData }, keyPair
 func (c *Appointments) confirmProvider(context *jsonrpc.Context, params *ConfirmProviderParams) *jsonrpc.Response {
-	return context.Acknowledge()
+	return context.NotFound()
 }
 
 var AddMediatorPublicKeysForm = forms.Form{
@@ -412,7 +412,7 @@ type AddMediatorPublicKeysData struct {
 // { keys }, keyPair
 // add the mediator key to the list of keys (only for testing)
 func (c *Appointments) addMediatorPublicKeys(context *jsonrpc.Context, params *AddMediatorPublicKeysParams) *jsonrpc.Response {
-	return nil
+	return context.NotFound()
 }
 
 // public endpoints
@@ -449,7 +449,7 @@ type GetQueuesParams struct {
 
 // { zipCode, radius }
 func (c *Appointments) getQueues(context *jsonrpc.Context, params *GetQueuesParams) *jsonrpc.Response {
-	return context.Acknowledge()
+	return context.InternalError()
 }
 
 type GetKeysParams struct {
@@ -530,7 +530,7 @@ type DeleteDataData struct {
 
 // { id }, keyPair
 func (c *Appointments) deleteData(context *jsonrpc.Context, params *DeleteDataParams) *jsonrpc.Response {
-	return nil
+	return context.NotFound()
 }
 
 var GetDataForm = forms.Form{
@@ -592,7 +592,7 @@ type GetDataData struct {
 
 // { id }, keyPair
 func (c *Appointments) getData(context *jsonrpc.Context, params *GetDataParams) *jsonrpc.Response {
-	return nil
+	return context.NotFound()
 }
 
 var BulkGetDataForm = forms.Form{
@@ -658,7 +658,7 @@ type BulkGetDataData struct {
 
 // { ids }, keyPair
 func (c *Appointments) bulkGetData(context *jsonrpc.Context, params *BulkGetDataParams) *jsonrpc.Response {
-	return nil
+	return context.NotFound()
 }
 
 var BulkStoreDataForm = forms.Form{
@@ -739,7 +739,7 @@ type Grant struct {
 
 // { dataList }, keyPair
 func (c *Appointments) bulkStoreData(context *jsonrpc.Context, params *BulkStoreDataParams) *jsonrpc.Response {
-	return nil
+	return context.NotFound()
 }
 
 var StoreDataForm = forms.Form{
@@ -830,7 +830,7 @@ type StoreDataParams struct {
 // { id, data, permissions, grant }, keyPair
 // store provider data for verification
 func (c *Appointments) storeData(context *jsonrpc.Context, params *StoreDataParams) *jsonrpc.Response {
-	return nil
+	return context.NotFound()
 }
 
 // user endpoints
@@ -949,7 +949,7 @@ type TokenData struct {
 //{hash, encryptedData, queueID, queueData, signedTokenData}
 // get a token for a given queue
 func (c *Appointments) getToken(context *jsonrpc.Context, params *GetTokenParams) *jsonrpc.Response {
-	return nil
+	return context.NotFound()
 }
 
 // provider-only endpoints
@@ -1047,7 +1047,7 @@ type Capacity struct {
 // { capacities }, keyPair
 // get n tokens from the given queue IDs
 func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueueTokensParams) *jsonrpc.Response {
-	return nil
+	return context.NotFound()
 }
 
 var StoreProviderDataForm = forms.Form{
@@ -1104,7 +1104,7 @@ var StoreProviderDataDataForm = forms.Form{
 			},
 		},
 		{
-			Name: "encrypteData",
+			Name: "encryptedData",
 			Validators: []forms.Validator{
 				forms.IsStringMap{
 					Form: &ECDHEncryptedDataForm,
@@ -1128,7 +1128,7 @@ type StoreProviderDataData struct {
 
 // { id, encryptedData, code }, keyPair
 func (c *Appointments) storeProviderData(context *jsonrpc.Context, params *StoreProviderDataParams) *jsonrpc.Response {
-	return nil
+	return context.NotFound()
 }
 
 var MarkTokenAsUsedForm = forms.Form{
@@ -1156,7 +1156,7 @@ type MarkTokenAsUsedParams struct {
 // mark a given token as used using its secret
 // { token, secret }, keyPair
 func (c *Appointments) markTokenAsUsed(context *jsonrpc.Context, params *MarkTokenAsUsedParams) *jsonrpc.Response {
-	return nil
+	return context.NotFound()
 }
 
 var GetPendingProviderDataForm = forms.Form{
@@ -1225,5 +1225,5 @@ type GetPendingProviderDataData struct {
 // mediator-only endpoint
 // { limit }, keyPair
 func (c *Appointments) getPendingProviderData(context *jsonrpc.Context, params *GetPendingProviderDataParams) *jsonrpc.Response {
-	return nil
+	return context.NotFound()
 }
