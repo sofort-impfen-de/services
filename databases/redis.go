@@ -16,25 +16,25 @@
 
 package databases
 
-/*
 import (
-	"fmt"
 	"github.com/go-redis/redis"
+	"github.com/kiebitz-oss/services"
 	"github.com/kiprotect/go-helpers/forms"
-	"github.com/kiprotect/kodex-ee"
-	"regexp"
-	"sort"
-	"strconv"
-	"strings"
 	"time"
 )
 
-type RedisDatabase struct {
+type Redis struct {
 	client  redis.UniversalClient
 	options redis.UniversalOptions
 }
 
-var RedisDatabaseForm = forms.Form{
+type RedisSettings struct {
+	Addresses []string `json:"addresses`
+	Database  int64    `json:"database"`
+	Password  string   `json:"password"`
+}
+
+var RedisForm = forms.Form{
 	ErrorMsg: "invalid data encountered in the Redis config form",
 	Fields: []forms.Field{
 		{
@@ -61,28 +61,39 @@ var RedisDatabaseForm = forms.Form{
 	},
 }
 
-func MakeRedisDatabase(config map[string]interface{}) (*RedisDatabase, error) {
-
-	params, err := RedisDatabaseForm.Validate(config)
-	if err != nil {
+func ValidateRedisSettings(settings map[string]interface{}) (interface{}, error) {
+	if params, err := RedisForm.Validate(settings); err != nil {
 		return nil, err
+	} else {
+		redisSettings := &RedisSettings{}
+		if err := RedisForm.Coerce(redisSettings, params); err != nil {
+			return nil, err
+		}
+		return redisSettings, nil
 	}
+}
+
+func MakeRedis(settings interface{}) (services.Database, error) {
+
+	redisSettings := settings.(RedisSettings)
 
 	options := redis.UniversalOptions{
-		Password:     params["password"].(string),
+		Password:     redisSettings.Password,
 		ReadTimeout:  time.Second * 1.0,
 		WriteTimeout: time.Second * 1.0,
-		Addrs:        params["addresses"].([]string),
-		DB:           int(params["database"].(int64)),
+		Addrs:        redisSettings.Addresses,
+		DB:           int(redisSettings.Database),
 	}
 
 	client := redis.NewUniversalClient(&options)
 
 	if _, err := client.Ping().Result(); err != nil {
 		return nil, err
+	} else {
+		services.Log.Debug("Ping to Redis succeeded!")
 	}
 
-	database := &RedisDatabase{
+	database := &Redis{
 		options: options,
 		client:  client,
 	}
@@ -90,6 +101,47 @@ func MakeRedisDatabase(config map[string]interface{}) (*RedisDatabase, error) {
 	return database, nil
 
 }
+
+func (d *Redis) Open() error {
+	return nil
+}
+
+func (d *Redis) Close() error {
+	return nil
+}
+
+func (d *Redis) Begin() error {
+	return nil
+}
+
+func (d *Redis) Commit() error {
+	return nil
+}
+
+func (d *Redis) Rollback() error {
+	return nil
+}
+
+func (d *Redis) Set(table string, key []byte) services.Set {
+	return nil
+}
+func (d *Redis) SortedSet(table string, key []byte) services.SortedSet {
+	return nil
+}
+
+func (d *Redis) List(table string, key []byte) services.List {
+	return nil
+}
+
+func (d *Redis) Map(table string, key []byte) services.Map {
+	return nil
+}
+
+func (d *Redis) Value(table string, key []byte) services.Value {
+	return nil
+}
+
+/*
 
 var paramsRegex = regexp.MustCompile(`^([^\()]+)\((.*)\)$`)
 
@@ -112,33 +164,33 @@ func decodeData(value string) (map[string]string, string) {
 	}
 }
 
-func (r *RedisDatabase) Teardown() error {
+func (r *Redis) Teardown() error {
 	client := r.client
 	r.client = nil
 	return client.Close()
 }
 
-func (r *RedisDatabase) Get(table string, key []byte) ([][]byte, error) {
+func (r *Redis) Get(table string, key []byte) ([][]byte, error) {
 	return nil, nil
 }
 
-func (r *RedisDatabase) Set(table string, key, value []byte, ttl time.Duration) error {
+func (r *Redis) Set(table string, key, value []byte, ttl time.Duration) error {
 	return nil
 }
 
-func (r *RedisDatabase) Append(table string, key, value []byte, ttl time.Duration) error {
+func (r *Redis) Append(table string, key, value []byte, ttl time.Duration) error {
 	return nil
 }
 
-func (r *RedisDatabase) DeleteAll(table string, key []byte) error {
+func (r *Redis) DeleteAll(table string, key []byte) error {
 	return nil
 }
 
-func (r *RedisDatabase) DeleteByValue(table string, key, value []byte) error {
+func (r *Redis) DeleteByValue(table string, key, value []byte) error {
 	return nil
 }
 
-func (r *RedisDatabase) DeleteBySha256(table string, key, hash []byte) error {
+func (r *Redis) DeleteBySha256(table string, key, hash []byte) error {
 	return nil
 }
 */

@@ -16,6 +16,10 @@
 
 package jsonrpc
 
+import (
+	"encoding/json"
+)
+
 type Request struct {
 	JSONRPC string                 `json:"jsonrpc"`
 	Method  string                 `json:"method"`
@@ -23,11 +27,25 @@ type Request struct {
 	ID      string                 `json:"id"`
 }
 
+func MakeRequest(method, id string, params map[string]interface{}) *Request {
+	return &Request{
+		Method:  method,
+		Params:  params,
+		JSONRPC: "2.0",
+		ID:      id,
+	}
+}
+
 type Response struct {
 	JSONRPC string      `json:"jsonrpc"`
 	Result  interface{} `json:"result,omitempty"`
 	Error   *Error      `json:"error,omitempty"`
 	ID      interface{} `json:"id"`
+}
+
+func (r *Response) AsJSON() string {
+	bytes, _ := json.MarshalIndent(r, "", "  ")
+	return string(bytes)
 }
 
 type Error struct {

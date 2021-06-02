@@ -55,6 +55,11 @@ type ECDSASignature struct {
 	R, S *big.Int
 }
 
+func (e *ECDSASignature) Serialize() []byte {
+	// we simply concatenate the R & S values
+	return append(e.R.Bytes(), e.S.Bytes()...)
+}
+
 func Verify(message []byte, signatureBytes []byte, publicKey *ecdsa.PublicKey) (bool, error) {
 	sig := &ECDSASignature{
 		R: &big.Int{},

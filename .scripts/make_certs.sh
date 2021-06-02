@@ -52,4 +52,5 @@ do
 	openssl ec -in "${key}.key" -pubout -out "${key}.pub";
 	openssl req -new -sha256 -key "${key}.key" -subj "/C=${C}/ST=${ST}/L=${L}/O=${O}/OU=${OU}/CN=${key}" -addext "keyUsage=keyAgreement" -addext "subjectAltName = URI:kiebitz-name://${key},URI:kiebitz-group://${groups[${key}]},DNS:${key}"  -out "${key}.csr";
 	openssl x509 -req -in "${key}.csr" -CA root.crt -CAkey root.key -CAcreateserial -out "${key}.crt"  -extensions SANKey -extfile <(printf "[SANKey]\nsubjectAltName = URI:kiebitz-name://${key},URI:kiebitz-group://${groups[${key}]},DNS:${key}\nkeyUsage = keyAgreement") -days 500 -sha256;
+	openssl pkcs8 -topk8 -nocrypt -inform PEM -outform PEM -in "${key}.key" -out "${key}.pk8.key"
 done

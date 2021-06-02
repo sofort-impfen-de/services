@@ -14,23 +14,16 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-package databases
+package forms
 
 import (
-	"github.com/kiebitz-oss/services"
+	"github.com/kiprotect/go-helpers/forms"
 )
 
-var Databases = services.DatabaseDefinitions{
-	"redis": services.DatabaseDefinition{
-		Name:              "Redis Database",
-		Description:       "For Production Use",
-		Maker:             MakeRedis,
-		SettingsValidator: ValidateRedisSettings,
-	},
-	"in-memory": services.DatabaseDefinition{
-		Name:              "In-memory Database (no persistence! just use for testing)",
-		Description:       "An in-memory database for testing only",
-		Maker:             MakeInMemory,
-		SettingsValidator: ValidateInMemorySettings,
+var QueueForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "foo",
+		},
 	},
 }

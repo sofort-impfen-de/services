@@ -1,8 +1,11 @@
 name: kiebitz
 database:
   name: db
-  type: in-memory
-  settings: {}
+  type: redis
+  settings:
+    addresses: ["localhost:6379"]
+    database: 0
+    password: ""
 storage:
   settings_ttl_days: 60
   rpc:
@@ -11,10 +14,14 @@ storage:
     #  ca_certificate_file: "$DIR/certs/root.crt"
     #  certificate_file: "$DIR/certs/storage-1.crt"
     #  key_file: "$DIR/certs/storage-1.key"
-signing:
-  root_keys: []
+admin:
+  signing:
+    keys: []
+  client:
+    appointments_endpoint: "http://localhost:8888/jsonrpc"
+    storage_endpoint: "http://localhost:9999/jsonrpc"
 appointments:
-  root_keys: []
+  keys: []
   rpc:
     bind_address: localhost:8888
     cors:

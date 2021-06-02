@@ -17,7 +17,6 @@
 package databases
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"github.com/kiebitz-oss/services"
 	"time"
@@ -69,6 +68,38 @@ func (d *InMemory) Close() error {
 	return nil
 }
 
+func (d *InMemory) Begin() error {
+	return nil
+}
+
+func (d *InMemory) Commit() error {
+	return nil
+}
+
+func (d *InMemory) Rollback() error {
+	return nil
+}
+
+func (d *InMemory) Set(table string, key []byte) services.Set {
+	return nil
+}
+func (d *InMemory) SortedSet(table string, key []byte) services.SortedSet {
+	return nil
+}
+
+func (d *InMemory) List(table string, key []byte) services.List {
+	return nil
+}
+
+func (d *InMemory) Map(table string, key []byte) services.Map {
+	return nil
+}
+
+func (d *InMemory) Value(table string, key []byte) services.Value {
+	return nil
+}
+
+/*
 func (d *InMemory) Get(table string, key []byte) ([][]byte, error) {
 	if data, ok := d.Data[hash(fk(table, key))]; !ok {
 		return nil, NotFound
@@ -135,3 +166,4 @@ func (d *InMemory) DeleteBySha256(table string, key, h []byte) error {
 	}
 	return nil
 }
+*/

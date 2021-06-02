@@ -19,8 +19,10 @@ package servers
 import (
 	"encoding/json"
 	"github.com/kiebitz-oss/services"
+	kbForms "github.com/kiebitz-oss/services/forms"
 	"github.com/kiebitz-oss/services/jsonrpc"
 	"github.com/kiprotect/go-helpers/forms"
+	"time"
 )
 
 type Appointments struct {
@@ -44,6 +46,10 @@ func MakeAppointments(settings *services.AppointmentsSettings, db services.Datab
 		"addMediatorPublicKeys": {
 			Form:    &AddMediatorPublicKeysForm,
 			Handler: Appointments.addMediatorPublicKeys,
+		},
+		"setQueues": {
+			Form:    &SetQueuesForm,
+			Handler: Appointments.setQueues,
 		},
 		"getQueues": {
 			Form:    &GetQueuesForm,
@@ -119,12 +125,18 @@ func (c *Appointments) Stop() error {
 
 // Method Handlers
 
-type JSON struct{}
+type JSON struct {
+	Key string
+}
 
 func (j JSON) Validate(value interface{}, values map[string]interface{}) (interface{}, error) {
 	var jsonValue interface{}
 	if err := json.Unmarshal([]byte(value.(string)), &jsonValue); err != nil {
 		return nil, err
+	}
+	// we assign the original value to the given key
+	if j.Key != "" {
+		values[j.Key] = value
 	}
 	return jsonValue, nil
 }
@@ -135,7 +147,9 @@ var ConfirmProviderForm = forms.Form{
 			Name: "data",
 			Validators: []forms.Validator{
 				forms.IsString{},
-				JSON{},
+				JSON{
+					Key: "json",
+				},
 				forms.IsStringMap{
 					Form: &ConfirmProviderDataForm,
 				},
@@ -219,7 +233,7 @@ var ConfirmProviderDataForm = forms.Form{
 			},
 		},
 		{
-			Name: "providerData",
+			Name: "encryptedProviderData",
 			Validators: []forms.Validator{
 				forms.IsStringMap{
 					Form: &ECDHEncryptedDataForm,
@@ -227,7 +241,7 @@ var ConfirmProviderDataForm = forms.Form{
 			},
 		},
 		{
-			Name: "keyData",
+			Name: "signedKeyData",
 			Validators: []forms.Validator{
 				forms.IsStringMap{
 					Form: &SignedKeyDataForm,
@@ -243,7 +257,9 @@ var SignedKeyDataForm = forms.Form{
 			Name: "data",
 			Validators: []forms.Validator{
 				forms.IsString{},
-				JSON{},
+				JSON{
+					Key: "json",
+				},
 				forms.IsStringMap{
 					Form: &KeyDataForm,
 				},
@@ -310,18 +326,20 @@ var KeyDataForm = forms.Form{
 }
 
 type ConfirmProviderParams struct {
+	JSON      string               `json:"json"`
 	Data      *ConfirmProviderData `json:"data"`
 	Signature []byte               `json:"signature"`
 	PublicKey []byte               `json:"publicKey"`
 }
 
 type ConfirmProviderData struct {
-	ID           []byte             `json:"id"`
-	ProviderData *ECDHEncryptedData `json:"providerData"`
-	KeyData      *SignedKeyData     `json:"keyData"`
+	ID                    []byte             `json:"id"`
+	EncryptedProviderData *ECDHEncryptedData `json:"encryptedProviderData"`
+	SignedKeyData         *SignedKeyData     `json:"signedKeyData"`
 }
 
 type SignedKeyData struct {
+	JSON      string   `json:"json"`
 	Data      *KeyData `json:"data"`
 	Signature []byte   `json:"signature"`
 	PublicKey []byte   `json:"publicKey"`
@@ -342,6 +360,32 @@ type ECDHEncryptedData struct {
 
 // { id, key, providerData, keyData }, keyPair
 func (c *Appointments) confirmProvider(context *jsonrpc.Context, params *ConfirmProviderParams) *jsonrpc.Response {
+
+	/*
+	   let found = false;
+	   const keyDataJSON = JSON.parse(signedKeyData.data);
+	   const newProviders = [];
+	   for (const existingKey of this.keys.providers) {
+	       const existingKeyDataJSON = JSON.parse(existingKey.data);
+	       if (existingKeyDataJSON.signing === keyDataJSON.signing) {
+	           found = true;
+	           newProviders.push(signedKeyData);
+	       } else {
+	           newProviders.push(existingKey);
+	       }
+	   }
+	   if (!found) newProviders.push(signedKeyData);
+	   this.keys.providers = newProviders;
+	   this.store.set('keys', this.keys);
+	   // we store the verified provider data
+	   const result = await this.storeData(
+	       { id, data: signedProviderData },
+	       keyPair
+	   );
+	   if (!result) return;
+	   return {};
+	*/
+
 	return context.NotFound()
 }
 
@@ -351,7 +395,9 @@ var AddMediatorPublicKeysForm = forms.Form{
 			Name: "data",
 			Validators: []forms.Validator{
 				forms.IsString{},
-				JSON{},
+				JSON{
+					Key: "json",
+				},
 				forms.IsStringMap{
 					Form: &AddMediatorPublicKeysDataForm,
 				},
@@ -399,6 +445,7 @@ var AddMediatorPublicKeysDataForm = forms.Form{
 }
 
 type AddMediatorPublicKeysParams struct {
+	JSON      string                     `json:"json"`
 	Data      *AddMediatorPublicKeysData `json:"data"`
 	Signature []byte                     `json:"signature"`
 	PublicKey []byte                     `json:"publicKey"`
@@ -413,6 +460,109 @@ type AddMediatorPublicKeysData struct {
 // add the mediator key to the list of keys (only for testing)
 func (c *Appointments) addMediatorPublicKeys(context *jsonrpc.Context, params *AddMediatorPublicKeysParams) *jsonrpc.Response {
 	return context.NotFound()
+}
+
+// admin endpoints
+
+var SetQueuesForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "data",
+			Validators: []forms.Validator{
+				forms.IsString{},
+				JSON{
+					Key: "json",
+				},
+				forms.IsStringMap{
+					Form: &SetQueuesDataForm,
+				},
+			},
+		},
+		{
+			Name: "signature",
+			Validators: []forms.Validator{
+				forms.IsBytes{
+					Encoding:  "base64",
+					MaxLength: 1000,
+					MinLength: 50,
+				},
+			},
+		},
+		{
+			Name: "publicKey",
+			Validators: []forms.Validator{
+				forms.IsOptional{},
+				forms.IsBytes{
+					Encoding:  "base64",
+					MaxLength: 1000,
+					MinLength: 50,
+				},
+			},
+		},
+	},
+}
+
+var SetQueuesDataForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "timestamp",
+			Validators: []forms.Validator{
+				forms.IsTime{
+					Format: "rfc3339",
+				},
+			},
+		},
+		{
+			Name: "queues",
+			Validators: []forms.Validator{
+				forms.IsList{
+					Validators: []forms.Validator{
+						forms.IsStringMap{
+							Form: &kbForms.QueueForm,
+						},
+					},
+				},
+			},
+		},
+	},
+}
+
+type SetQueuesParams struct {
+	JSON      string         `json:"json"`
+	Data      *SetQueuesData `json:"data"`
+	Signature []byte         `json:"signature"`
+	PublicKey []byte         `json:"publicKey"`
+}
+
+type SetQueuesData struct {
+	Timestamp *time.Time `json:"timestamp"`
+	Qeues     []*Queue   `json:"queues"`
+}
+
+type Queue struct {
+	Name string                 `json:"name"`
+	Type string                 `json:"type"`
+	ID   []byte                 `json:"id"`
+	Data map[string]interface{} `json:"data"`
+}
+
+func (c *Appointments) setQueues(context *jsonrpc.Context, params *SetQueuesParams) *jsonrpc.Response {
+	services.Log.Debugf("'setQueues' called")
+	rootKey := c.settings.Key("root")
+	if rootKey == nil {
+		services.Log.Error("root key missing")
+		return context.InternalError()
+	}
+	if ok, err := rootKey.Verify(&services.SignedData{
+		Data:      []byte(params.JSON),
+		Signature: params.Signature,
+	}); !ok {
+		return context.Error(403, "invalid signature", nil)
+	} else if err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+	return context.Acknowledge()
 }
 
 // public endpoints
@@ -480,7 +630,9 @@ var DeleteDataForm = forms.Form{
 			Name: "data",
 			Validators: []forms.Validator{
 				forms.IsString{},
-				JSON{},
+				JSON{
+					Key: "json",
+				},
 				forms.IsStringMap{
 					Form: &DeleteDataDataForm,
 				},
@@ -522,6 +674,7 @@ var DeleteDataDataForm = forms.Form{
 }
 
 type DeleteDataParams struct {
+	JSON      string          `json:"json"`
 	Data      *DeleteDataData `json:"data"`
 	Signature []byte          `json:"signature"`
 	PublicKey []byte          `json:"publicKey"`
@@ -542,7 +695,9 @@ var GetDataForm = forms.Form{
 			Name: "data",
 			Validators: []forms.Validator{
 				forms.IsString{},
-				JSON{},
+				JSON{
+					Key: "json",
+				},
 				forms.IsStringMap{
 					Form: &GetDataDataForm,
 				},
@@ -584,6 +739,7 @@ var GetDataDataForm = forms.Form{
 }
 
 type GetDataParams struct {
+	JSON      string       `json:"json"`
 	Data      *GetDataData `json:"data"`
 	Signature []byte       `json:"signature"`
 	PublicKey []byte       `json:"publicKey"`
@@ -604,7 +760,9 @@ var BulkGetDataForm = forms.Form{
 			Name: "data",
 			Validators: []forms.Validator{
 				forms.IsString{},
-				JSON{},
+				JSON{
+					Key: "json",
+				},
 				forms.IsStringMap{
 					Form: &BulkGetDataDataForm,
 				},
@@ -650,6 +808,7 @@ var BulkGetDataDataForm = forms.Form{
 }
 
 type BulkGetDataParams struct {
+	JSON      string           `json:"json"`
 	Data      *BulkGetDataData `json:"data"`
 	Signature []byte           `json:"signature"`
 	PublicKey []byte           `json:"publicKey"`
@@ -670,7 +829,9 @@ var BulkStoreDataForm = forms.Form{
 			Name: "data",
 			Validators: []forms.Validator{
 				forms.IsString{},
-				JSON{},
+				JSON{
+					Key: "json",
+				},
 				forms.IsStringMap{
 					Form: &BulkStoreDataDataForm,
 				},
@@ -718,6 +879,7 @@ var BulkStoreDataDataForm = forms.Form{
 }
 
 type BulkStoreDataParams struct {
+	JSON      string             `json:"json"`
 	Data      *BulkStoreDataData `json:"data"`
 	Signature []byte             `json:"signature"`
 	PublicKey []byte             `json:"publicKey"`
@@ -751,7 +913,9 @@ var StoreDataForm = forms.Form{
 			Name: "data",
 			Validators: []forms.Validator{
 				forms.IsString{},
-				JSON{},
+				JSON{
+					Key: "json",
+				},
 				forms.IsStringMap{
 					Form: &StoreDataDataForm,
 				},
@@ -825,6 +989,7 @@ var GrantForm = forms.Form{
 }
 
 type StoreDataParams struct {
+	JSON      string         `json:"json"`
 	Data      *StoreDataData `json:"data"`
 	Signature []byte         `json:"signature"`
 	PublicKey []byte         `json:"publicKey"`
@@ -883,7 +1048,9 @@ var SignedTokenDataForm = forms.Form{
 			Name: "data",
 			Validators: []forms.Validator{
 				forms.IsString{},
-				JSON{},
+				JSON{
+					Key: "json",
+				},
 				forms.IsStringMap{
 					Form: &TokenDataForm,
 				},
@@ -939,6 +1106,7 @@ type GetTokenParams struct {
 }
 
 type SignedTokenData struct {
+	JSON      string     `json:"json"`
 	Data      *TokenData `json:"data"`
 	Signature []byte     `json:"signature"`
 	PublicKey []byte     `json:"publicKey"`
@@ -963,7 +1131,9 @@ var GetQueueTokensForm = forms.Form{
 			Name: "data",
 			Validators: []forms.Validator{
 				forms.IsString{},
-				JSON{},
+				JSON{
+					Key: "json",
+				},
 				forms.IsStringMap{
 					Form: &GetQueueTokensDataForm,
 				},
@@ -1033,6 +1203,7 @@ var CapacityForm = forms.Form{
 }
 
 type GetQueueTokensParams struct {
+	JSON      string              `json:"json"`
 	Data      *GetQueueTokensData `json:"data"`
 	Signature []byte              `json:"signature"`
 	PublicKey []byte              `json:"publicKey"`
@@ -1059,7 +1230,9 @@ var StoreProviderDataForm = forms.Form{
 			Name: "data",
 			Validators: []forms.Validator{
 				forms.IsString{},
-				JSON{},
+				JSON{
+					Key: "json",
+				},
 				forms.IsStringMap{
 					Form: &StoreProviderDataDataForm,
 				},
@@ -1118,6 +1291,7 @@ var StoreProviderDataDataForm = forms.Form{
 }
 
 type StoreProviderDataParams struct {
+	JSON      string                 `json:"json"`
 	Data      *StoreProviderDataData `json:"data"`
 	Signature []byte                 `json:"signature"`
 	PublicKey []byte                 `json:"publicKey"`
@@ -1131,6 +1305,29 @@ type StoreProviderDataData struct {
 
 // { id, encryptedData, code }, keyPair
 func (c *Appointments) storeProviderData(context *jsonrpc.Context, params *StoreProviderDataParams) *jsonrpc.Response {
+
+	/*
+	   const signedData = await sign(
+	       keyPair.privateKey,
+	       JSON.stringify(encryptedData),
+	       keyPair.publicKey
+	   );
+
+	   const result = await this.storeData(
+	       { id: id, data: signedData },
+	       keyPair
+	   );
+	   if (!result) return;
+	   let providerDataList = this.store.get('providers::list');
+	   if (providerDataList === null) providerDataList = [];
+	   for (const pid of providerDataList) {
+	       if (id === pid) return;
+	   }
+	   providerDataList.push(id);
+	   // we update the provider data list
+	   this.store.set('providers::list', providerDataList);
+
+	*/
 	return context.NotFound()
 }
 
@@ -1168,7 +1365,9 @@ var GetPendingProviderDataForm = forms.Form{
 			Name: "data",
 			Validators: []forms.Validator{
 				forms.IsString{},
-				JSON{},
+				JSON{
+					Key: "json",
+				},
 				forms.IsStringMap{
 					Form: &GetPendingProviderDataDataForm,
 				},
@@ -1216,6 +1415,7 @@ var GetPendingProviderDataDataForm = forms.Form{
 }
 
 type GetPendingProviderDataParams struct {
+	JSON      string                      `json:"json"`
 	Data      *GetPendingProviderDataData `json:"data"`
 	Signature []byte                      `json:"signature"`
 	PublicKey []byte                      `json:"publicKey"`
