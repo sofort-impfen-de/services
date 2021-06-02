@@ -8,19 +8,7 @@ storage:
   rpc:
     bind_address: 0.0.0.0:9999
 appointments:
-  root_keys:
-    - type: ecdsa
-      format: spki
-      params:
-        curve: p-256
-      public_key: aaaa
-      purposes: [manage-provider-codes]
-    - type: ecdsa
-      format: spki
-      params:
-        curve: p-256
-      public_key: bbbb
-      purposes: [manage-mediators]
+  keys: []
   rpc:
     bind_address: 0.0.0.0:8888
   cors:
