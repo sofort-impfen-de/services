@@ -612,10 +612,13 @@ var GetKeysForm = forms.Form{
 // return all public keys present in the system
 func (c *Appointments) getKeys(context *jsonrpc.Context, params *GetKeysParams) *jsonrpc.Response {
 	return context.Result(map[string]interface{}{
-		"lists":        map[string]interface{}{},
-		"providerData": c.settings.RootKey("providerData").PublicKey,
-		"rootKey":      c.settings.RootKey("root").PublicKey,
-		"tokenKey":     c.settings.RootKey("token").PublicKey,
+		"lists": map[string]interface{}{
+			"providers": []map[string]interface{}{},
+			"mediators": []map[string]interface{}{},
+		},
+		"providerData": c.settings.Key("providerData").PublicKey,
+		"rootKey":      c.settings.Key("root").PublicKey,
+		"tokenKey":     c.settings.Key("token").PublicKey,
 	})
 }
 
