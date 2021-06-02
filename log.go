@@ -75,10 +75,17 @@ func (l *Logger) Debugf(format string, args ...interface{}) {
 	log.Debugf(format, args...)
 }
 
+func (l *Logger) Trace(args ...interface{}) {
+	log.Trace(args...)
+}
+
+func (l *Logger) Tracef(format string, args ...interface{}) {
+	log.Tracef(format, args...)
+}
+
 func (l *Logger) Debug(args ...interface{}) {
 	log.Debug(args...)
 }
-
 func (l *Logger) Infof(format string, args ...interface{}) {
 	log.Infof(format, args...)
 }
