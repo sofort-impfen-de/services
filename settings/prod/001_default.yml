@@ -12,6 +12,6 @@ appointments:
   rpc:
     bind_address: 0.0.0.0:8888
   cors:
-    allowed_hosts: ["^https://app.sofort-impfen.de$"]
+    allowed_hosts: ["^https://app.sofort-impfen.de$", "^https://app.sofort-impfen.de/$", "https://app.sofort-impfen.de"]
     allowed_headers: ["*"]
     allowed_methods: ["POST", "OPTIONS"]
