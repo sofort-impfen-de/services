@@ -233,7 +233,7 @@ var SignedKeyDataForm = forms.Form{
 				forms.IsBytes{
 					Encoding:  "base64",
 					MaxLength: 1000,
-					MinLength: 50,
+					MinLength: 30,
 				},
 			},
 		},
@@ -244,7 +244,7 @@ var SignedKeyDataForm = forms.Form{
 				forms.IsBytes{
 					Encoding:  "base64",
 					MaxLength: 1000,
-					MinLength: 50,
+					MinLength: 30,
 				},
 			},
 		},
@@ -317,6 +317,61 @@ type KeyData struct {
 // { id, key, providerData, keyData }, keyPair
 func (c *Appointments) confirmProvider(context *jsonrpc.Context, params *ConfirmProviderParams) *jsonrpc.Response {
 
+	if resp := c.isMediator(context, []byte(params.JSON), params.Signature, params.PublicKey); resp != nil {
+		return resp
+	}
+
+	/*
+		if data, err := .Get(); err != nil {
+			services.Log.Error(err)
+			return context.InternalError()
+		} else if i, err := toInterface(data); err != nil {
+			services.Log.Error(err)
+			return context.InternalError()
+		} else {
+			return context.Result(i)
+		}
+	*/
+
+	hash := crypto.Hash(params.Data.SignedKeyData.Data.Signing)
+	keys := c.db.Map("keys", []byte("providers"))
+
+	bd, err := json.Marshal(
+		&ActorKey{
+			Data:      params.Data.SignedKeyData.JSON,
+			Signature: params.Data.SignedKeyData.Signature,
+			PublicKey: params.Data.SignedKeyData.PublicKey,
+		})
+	if err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+
+	if err := keys.Set(hash, bd); err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+	if result, err := keys.Get(hash); err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	} else if !bytes.Equal(result, bd) {
+		services.Log.Error("does not match")
+		return context.InternalError()
+	}
+
+	data := c.db.Value("data", params.Data.ID)
+
+	pd, err := json.Marshal(params.Data.EncryptedProviderData)
+	if err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+
+	if err := data.Set(pd, time.Hour*24*365); err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+
 	/*
 	   let found = false;
 	   const keyDataJSON = JSON.parse(signedKeyData.data);
@@ -342,7 +397,7 @@ func (c *Appointments) confirmProvider(context *jsonrpc.Context, params *Confirm
 	   return {};
 	*/
 
-	return context.NotFound()
+	return context.Acknowledge()
 }
 
 var AddMediatorPublicKeysForm = forms.Form{
@@ -723,14 +778,14 @@ func findActorKey(keys []*ActorKey, publicKey []byte) (*ActorKey, error) {
 	return nil, nil
 }
 
-func (c *Appointments) getKeysData() (*Keys, error) {
-	mk, err := c.db.Map("keys", []byte("mediators")).GetAll()
+func (c *Appointments) getListKeys(key string) ([]*ActorKey, error) {
+	mk, err := c.db.Map("keys", []byte(key)).GetAll()
 
 	if err != nil {
 		return nil, err
 	}
 
-	mediatorKeys := []*ActorKey{}
+	actorKeys := []*ActorKey{}
 
 	for _, v := range mk {
 		var m *ActorKey
@@ -738,13 +793,31 @@ func (c *Appointments) getKeysData() (*Keys, error) {
 			services.Log.Error(err)
 			continue
 		} else {
-			mediatorKeys = append(mediatorKeys, m)
+			actorKeys = append(actorKeys, m)
 		}
+	}
+
+	return actorKeys, nil
+
+}
+
+func (c *Appointments) getKeysData() (*Keys, error) {
+
+	mediatorKeys, err := c.getListKeys("mediators")
+
+	if err != nil {
+		return nil, err
+	}
+
+	providerKeys, err := c.getListKeys("providers")
+
+	if err != nil {
+		return nil, err
 	}
 
 	return &Keys{
 		Lists: &KeyLists{
-			Providers: []*ActorKey{},
+			Providers: providerKeys,
 			Mediators: mediatorKeys,
 		},
 		ProviderData: c.settings.Key("providerData").PublicKey,
@@ -1563,10 +1636,7 @@ type GetPendingProviderDataData struct {
 	N int64 `json:"n"`
 }
 
-// mediator-only endpoint
-// { limit }, keyPair
-func (c *Appointments) getPendingProviderData(context *jsonrpc.Context, params *GetPendingProviderDataParams) *jsonrpc.Response {
-
+func (c *Appointments) isMediator(context *jsonrpc.Context, data, signature, publicKey []byte) *jsonrpc.Response {
 	keys, err := c.getKeysData()
 
 	if err != nil {
@@ -1574,22 +1644,34 @@ func (c *Appointments) getPendingProviderData(context *jsonrpc.Context, params *
 		return context.InternalError()
 	}
 
-	providerKey, err := findActorKey(keys.Lists.Mediators, params.PublicKey)
+	mediatorKey, err := findActorKey(keys.Lists.Mediators, publicKey)
 
 	if err != nil {
 		services.Log.Error(err)
 		return context.InternalError()
 	}
 
-	if providerKey == nil {
+	if mediatorKey == nil {
 		return context.Error(403, "not authorized", nil)
 	}
 
-	if ok, err := crypto.VerifyWithBytes([]byte(params.JSON), params.Signature, params.PublicKey); err != nil {
+	if ok, err := crypto.VerifyWithBytes(data, signature, publicKey); err != nil {
 		services.Log.Error(err)
 		return context.InternalError()
 	} else if !ok {
 		return context.Error(401, "invalid signature", nil)
+	}
+
+	return nil
+
+}
+
+// mediator-only endpoint
+// { limit }, keyPair
+func (c *Appointments) getPendingProviderData(context *jsonrpc.Context, params *GetPendingProviderDataParams) *jsonrpc.Response {
+
+	if resp := c.isMediator(context, []byte(params.JSON), params.Signature, params.PublicKey); resp != nil {
+		return resp
 	}
 
 	providerData := c.db.Map("providerData", []byte("unverified"))
@@ -1685,29 +1767,8 @@ type GetQueuesForProviderData struct {
 // { queueIDs }, keyPair
 func (c *Appointments) getQueuesForProvider(context *jsonrpc.Context, params *GetQueuesForProviderParams) *jsonrpc.Response {
 
-	keys, err := c.getKeysData()
-
-	if err != nil {
-		services.Log.Error(err)
-		return context.InternalError()
-	}
-
-	providerKey, err := findActorKey(keys.Lists.Mediators, params.PublicKey)
-
-	if err != nil {
-		services.Log.Error(err)
-		return context.InternalError()
-	}
-
-	if providerKey == nil {
-		return context.Error(403, "not authorized", nil)
-	}
-
-	if ok, err := crypto.VerifyWithBytes([]byte(params.JSON), params.Signature, params.PublicKey); err != nil {
-		services.Log.Error(err)
-		return context.InternalError()
-	} else if !ok {
-		return context.Error(401, "invalid signature", nil)
+	if resp := c.isMediator(context, []byte(params.JSON), params.Signature, params.PublicKey); resp != nil {
+		return resp
 	}
 
 	if queues, err := c.getQueuesData(); err != nil {
