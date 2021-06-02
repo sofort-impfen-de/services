@@ -26,20 +26,20 @@ type StorageSettings struct {
 }
 
 type AppointmentsSettings struct {
-	RPC      *JSONRPCServerSettings `json:"rpc"`
-	RootKeys []*RootKey             `json:"root_keys"`
+	RPC  *JSONRPCServerSettings `json:"rpc"`
+	Keys []*Key                 `json:"keys"`
 }
 
-func (a *AppointmentsSettings) RootKey(name string) *RootKey {
-	for _, rootKey := range a.RootKeys {
-		if rootKey.Name == name {
-			return rootKey
+func (a *AppointmentsSettings) Key(name string) *Key {
+	for _, key := range a.Keys {
+		if key.Name == name {
+			return key
 		}
 	}
 	return nil
 }
 
-type RootKey struct {
+type Key struct {
 	Name      string                 `json:"name"`
 	Type      string                 `json:"type"`
 	Format    string                 `json:"format"`
@@ -51,7 +51,7 @@ type RootKey struct {
 }
 
 type SigningSettings struct {
-	RootKeys []*RootKey `json:"root_keys"`
+	Keys []*Key `json:"keys"`
 }
 
 type DatabaseSettings struct {

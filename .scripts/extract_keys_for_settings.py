@@ -51,13 +51,15 @@ if __name__ == '__main__':
                     km = re.match(r"^-----BEGIN EC PRIVATE KEY-----\n(.*)\n-----END EC PRIVATE KEY-----\s*$", c, re.DOTALL | re.I)
                     key['private_key'] = km.groups()[0].replace("\n", "")
         signing_keys = [copy.deepcopy(key) for key in list(keys.values())]
-        root_keys = [copy.deepcopy(key) for key in list(keys.values())]
-        for root_key in root_keys:
-            del root_key['private_key']
+        appointments_keys = [copy.deepcopy(key) for key in list(keys.values())]
+        for appointments_key in appointments_keys:
+            del appointments_key['private_key']
         settings = {
-            'signing': signing_keys,
+            'signing': {
+                'keys': signing_keys
+            },
             'appointments': {
-                'root_keys' : root_keys,
+                'keys' : appointments_keys,
             }
         }
         env_settings_dir = settings_dir.format(env=env)

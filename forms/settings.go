@@ -23,12 +23,12 @@ import (
 var SigningForm = forms.Form{
 	Fields: []forms.Field{
 		{
-			Name: "root_keys",
+			Name: "keys",
 			Validators: []forms.Validator{
 				forms.IsList{
 					Validators: []forms.Validator{
 						forms.IsStringMap{
-							Form: &RootKeyForm,
+							Form: &KeyForm,
 						},
 					},
 				},
@@ -98,7 +98,7 @@ var ECDSAParamsForm = forms.Form{
 	},
 }
 
-var RootKeyForm = forms.Form{
+var KeyForm = forms.Form{
 	Fields: []forms.Field{
 		{
 			Name: "type",
@@ -167,12 +167,12 @@ var RootKeyForm = forms.Form{
 var AppointmentsForm = forms.Form{
 	Fields: []forms.Field{
 		{
-			Name: "root_keys",
+			Name: "keys",
 			Validators: []forms.Validator{
 				forms.IsList{
 					Validators: []forms.Validator{
 						forms.IsStringMap{
-							Form: &RootKeyForm,
+							Form: &KeyForm,
 						},
 					},
 				},

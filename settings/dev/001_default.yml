@@ -11,7 +11,10 @@ storage:
     #  ca_certificate_file: "$DIR/certs/root.crt"
     #  certificate_file: "$DIR/certs/storage-1.crt"
     #  key_file: "$DIR/certs/storage-1.key"
+signing:
+  root_keys: []
 appointments:
+  root_keys: []
   rpc:
     bind_address: localhost:8888
     cors:
