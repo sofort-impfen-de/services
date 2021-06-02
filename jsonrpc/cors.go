@@ -40,6 +40,7 @@ func uniques(list []string) []string {
 func Cors(settings *services.CorsSettings, defaultRoute bool) http.Handler {
 
 	if settings == nil {
+		services.Log.Debugf("No CORS settings defined, returning empty handler...")
 		return func(c *http.Context) {
 
 		}
@@ -58,7 +59,7 @@ func Cors(settings *services.CorsSettings, defaultRoute bool) http.Handler {
 
 	decorator := func(c *http.Context) {
 
-		services.Log.Debugf("Checking cors...")
+		services.Log.Tracef("Checking CORS for request...")
 
 		allAllowedHeaders := strings.Join(
 			uniques(append([]string{c.Request.Header.Get("Access-Control-Request-Headers")},
@@ -67,6 +68,7 @@ func Cors(settings *services.CorsSettings, defaultRoute bool) http.Handler {
 		origin := c.Request.Header.Get("Origin")
 		found := false
 		for _, pattern := range allowedHostPatterns {
+			services.Log.Tracef("Pattern: %s, origin: %s", pattern, origin)
 			if pattern.MatchString(origin) {
 				c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
 				found = true
