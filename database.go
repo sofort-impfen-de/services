@@ -35,12 +35,42 @@ type DatabaseMaker func(settings interface{}) (Database, error)
 type Database interface {
 	Close() error
 	Open() error
-	Get(table string, key []byte) ([][]byte, error)
-	Set(table string, key, value []byte, ttl time.Duration) error
-	Append(table string, key, value []byte, ttl time.Duration) error
-	DeleteAll(table string, key []byte) error
-	DeleteByValue(table string, key, value []byte) error
-	DeleteBySha256(table string, key, hash []byte) error
+
+	Begin() error
+	Commit() error
+	Rollback() error
+
+	Set(table string, key []byte) Set
+	SortedSet(table string, key []byte) SortedSet
+	List(table string, key []byte) List
+	Map(table string, key []byte) Map
+	Value(table string, key []byte) Value
+}
+
+type Object interface {
+	Save() error
+}
+
+type Set interface {
+	Object
+}
+
+type SortedSet interface {
+	Object
+}
+
+type List interface {
+	Object
+}
+
+type Map interface {
+	Object
+}
+
+type Value interface {
+	Object
+	Set(value []byte, ttl time.Duration) error
+	Get() ([]byte, error)
 }
 
 type BaseDatabase struct {

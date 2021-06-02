@@ -94,7 +94,11 @@ type StoreSettingsParams struct {
 
 // store the settings in the database by ID
 func (c *Storage) storeSettings(context *jsonrpc.Context, params *StoreSettingsParams) *jsonrpc.Response {
-	if err := c.db.Set("settings", params.ID, params.Data, time.Duration(c.settings.SettingsTTLDays*24)*time.Hour); err != nil {
+	value := c.db.Value("settings", params.ID)
+	if err := value.Set(params.Data, time.Duration(c.settings.SettingsTTLDays*24)*time.Hour); err != nil {
+		return context.InternalError()
+	}
+	if err := value.Save(); err != nil {
 		return context.InternalError()
 	}
 	return context.Acknowledge()
@@ -116,7 +120,8 @@ var GetSettingsForm = forms.Form{
 }
 
 func (c *Storage) getSettings(context *jsonrpc.Context, params *GetSettingsParams) *jsonrpc.Response {
-	if data, err := c.db.Get("settings", params.ID); err != nil {
+	value := c.db.Value("settings", params.ID)
+	if data, err := value.Get(); err != nil {
 		if err == databases.NotFound {
 			return context.NotFound()
 		} else {
@@ -124,7 +129,7 @@ func (c *Storage) getSettings(context *jsonrpc.Context, params *GetSettingsParam
 			return context.InternalError()
 		}
 	} else {
-		return context.Result(EncodeSlice(data))
+		return context.Result(Encode(data))
 	}
 }
 

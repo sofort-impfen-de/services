@@ -14,29 +14,8 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-package helpers
+package services
 
-import (
-	"github.com/kiebitz-oss/services"
-	"github.com/urfave/cli"
-)
-
-func Crypto(settings *services.Settings, db services.Database) ([]cli.Command, error) {
-
-	return []cli.Command{
-		{
-			Name:    "crypto",
-			Aliases: []string{"s"},
-			Flags:   []cli.Flag{},
-			Usage:   "Cryptographic functions.",
-			Subcommands: []cli.Command{
-				{
-					Name:   "sign",
-					Flags:  []cli.Flag{},
-					Usage:  "Sign a payload.",
-					Action: func(c *cli.Context) error { return nil },
-				},
-			},
-		},
-	}, nil
+type Queue struct {
+	Name string `json:"name"`
 }

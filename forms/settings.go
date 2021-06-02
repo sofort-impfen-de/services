@@ -20,6 +20,44 @@ import (
 	"github.com/kiprotect/go-helpers/forms"
 )
 
+var AdminForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "signing",
+			Validators: []forms.Validator{
+				forms.IsStringMap{
+					Form: &SigningForm,
+				},
+			},
+		},
+		{
+			Name: "client",
+			Validators: []forms.Validator{
+				forms.IsStringMap{
+					Form: &ClientForm,
+				},
+			},
+		},
+	},
+}
+
+var ClientForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "storage_endpoint",
+			Validators: []forms.Validator{
+				forms.IsString{},
+			},
+		},
+		{
+			Name: "appointments_endpoint",
+			Validators: []forms.Validator{
+				forms.IsString{},
+			},
+		},
+	},
+}
+
 var SigningForm = forms.Form{
 	Fields: []forms.Field{
 		{
@@ -191,6 +229,15 @@ var AppointmentsForm = forms.Form{
 
 var SettingsForm = forms.Form{
 	Fields: []forms.Field{
+		{
+			Name: "admin",
+			Validators: []forms.Validator{
+				forms.IsOptional{},
+				forms.IsStringMap{
+					Form: &AdminForm,
+				},
+			},
+		},
 		{
 			Name: "name",
 			Validators: []forms.Validator{

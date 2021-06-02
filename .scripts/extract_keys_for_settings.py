@@ -26,7 +26,7 @@ if __name__ == '__main__':
         keys = {}
         dir = certificate_dir.format(env=env)
         for file in os.listdir(dir):
-            m = re.match(r"^(encrypt|sign)-([a-z]*)\.(pub|key)$", file, re.I)
+            m = re.match(r"^(encrypt|sign)-([a-z]*)\.(pub|pk8\.key)$", file, re.I)
             if m:
                 with open(os.path.join(dir, file)) as input:
                     c = input.read()
@@ -47,17 +47,21 @@ if __name__ == '__main__':
                 if type == 'pub':
                     km = re.match(r"^-----BEGIN PUBLIC KEY-----\n(.*)\n-----END PUBLIC KEY-----\s*$", c, re.DOTALL | re.I)
                     key['public_key'] = km.groups()[0].replace("\n", "")
-                elif type == 'key':
-                    km = re.match(r"^-----BEGIN EC PRIVATE KEY-----\n(.*)\n-----END EC PRIVATE KEY-----\s*$", c, re.DOTALL | re.I)
+                elif type == 'pk8.key':
+                    km = re.match(r"^-----BEGIN PRIVATE KEY-----\n(.*)\n-----END PRIVATE KEY-----\s*$", c, re.DOTALL | re.I)
                     key['private_key'] = km.groups()[0].replace("\n", "")
         signing_keys = [copy.deepcopy(key) for key in list(keys.values())]
-        root_keys = [copy.deepcopy(key) for key in list(keys.values())]
-        for root_key in root_keys:
-            del root_key['private_key']
+        appointments_keys = [copy.deepcopy(key) for key in list(keys.values())]
+        for appointments_key in appointments_keys:
+            del appointments_key['private_key']
         settings = {
-            'signing': signing_keys,
+            'admin': {
+                'signing': {
+                    'keys': signing_keys
+                },
+            },
             'appointments': {
-                'root_keys' : root_keys,
+                'keys' : appointments_keys,
             }
         }
         env_settings_dir = settings_dir.format(env=env)

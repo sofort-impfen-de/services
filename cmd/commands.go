@@ -23,8 +23,8 @@ import (
 
 var Commands = services.CommandsDefinitions{
 	services.CommandsDefinition{
-		Name:  "crypto",
-		Maker: helpers.Crypto,
+		Name:  "admin",
+		Maker: helpers.Admin,
 	},
 	services.CommandsDefinition{
 		Name:  "run",
