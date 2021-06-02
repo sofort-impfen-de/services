@@ -7,10 +7,6 @@ storage:
   settings_ttl_days: 60
   rpc:
     bind_address: 0.0.0.0:9999
-  cors:
-    allowed_hosts: ["^https://app.sofort-impfen.de$"]
-    allowed_headers: ["*"]
-    allowed_methods: ["POST", "OPTIONS"]
 appointments:
   root_keys:
     - type: ecdsa
