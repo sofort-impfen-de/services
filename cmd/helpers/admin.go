@@ -80,16 +80,12 @@ func uploadQueueData(settings *services.Settings, db services.Database) func(c *
 			services.Log.Fatal(err)
 		}
 
-		services.Log.Info(queues)
-
 		client := jsonrpc.MakeClient(settings.Admin.Client.AppointmentsEndpoint)
 
 		data := map[string]interface{}{
 			"queues":    queues.Queues,
 			"timestamp": time.Now(),
 		}
-
-		services.Log.Info(settings.Admin.Signing.Keys)
 
 		signingKey := settings.Admin.Signing.Key("root")
 
@@ -121,6 +117,189 @@ func uploadQueueData(settings *services.Settings, db services.Database) func(c *
 	}
 }
 
+var KeyPairsForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "signing",
+			Validators: []forms.Validator{
+				forms.IsStringMap{
+					Form: &KeyPairForm,
+				},
+			},
+		},
+		{
+			Name: "encryption",
+			Validators: []forms.Validator{
+				forms.IsStringMap{
+					Form: &KeyPairForm,
+				},
+			},
+		},
+	},
+}
+
+var KeyPairForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "publicKey",
+			Validators: []forms.Validator{
+				forms.IsBytes{
+					Encoding: "base64",
+				},
+			},
+		},
+		{
+			Name: "privateKey",
+			Validators: []forms.Validator{
+				forms.IsStringMap{
+					Form: &JWKPrivateKeyForm,
+				},
+			},
+		},
+	},
+}
+
+var JWKPrivateKeyForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "crv",
+			Validators: []forms.Validator{
+				forms.IsString{},
+			},
+		},
+		{
+			Name: "d",
+			Validators: []forms.Validator{
+				forms.IsString{},
+			},
+		},
+		{
+			Name: "x",
+			Validators: []forms.Validator{
+				forms.IsString{},
+			},
+		},
+		{
+			Name: "y",
+			Validators: []forms.Validator{
+				forms.IsString{},
+			},
+		},
+		{
+			Name: "ext",
+			Validators: []forms.Validator{
+				forms.IsBoolean{},
+			},
+		},
+		{
+			Name: "key_ops",
+			Validators: []forms.Validator{
+				forms.IsList{
+					Validators: []forms.Validator{
+						forms.IsString{},
+					},
+				},
+			},
+		},
+		{
+			Name: "kty",
+			Validators: []forms.Validator{
+				forms.IsString{},
+			},
+		},
+	},
+}
+
+type KeyPairs struct {
+	Signing    *KeyPair `json:"signing"`
+	Encryption *KeyPair `json:"encryption"`
+}
+
+type KeyPair struct {
+	PublicKey  []byte         `json:"publicKey"`
+	PrivateKey *JWKPrivateKey `json:"privateKey"`
+}
+
+type JWKPrivateKey struct {
+	Curve  string   `json:"crv"`
+	D      string   `json:"d"`
+	Ext    bool     `json:"ext"`
+	KeyOps []string `json:"key_ops"`
+	Kty    string   `json:"kty"`
+	X      string   `json:"x"`
+	Y      string   `json:"y"`
+}
+
+func uploadMediatorKeys(settings *services.Settings, db services.Database) func(c *cli.Context) error {
+	return func(c *cli.Context) error {
+
+		if settings.Admin == nil {
+			services.Log.Fatal("admin settings missing")
+		}
+
+		filename := c.Args().Get(0)
+
+		if filename == "" {
+			services.Log.Fatal("please specify a filename")
+		}
+
+		jsonBytes, err := ioutil.ReadFile(filename)
+
+		if err != nil {
+			services.Log.Fatal(err)
+		}
+
+		keyPairs := &KeyPairs{}
+		var rawKeyPairs map[string]interface{}
+
+		if err := json.Unmarshal(jsonBytes, &rawKeyPairs); err != nil {
+			services.Log.Fatal(err)
+		}
+
+		if params, err := KeyPairsForm.Validate(rawKeyPairs); err != nil {
+			services.Log.Fatal(err)
+		} else if KeyPairsForm.Coerce(keyPairs, params); err != nil {
+			services.Log.Fatal(err)
+		}
+
+		client := jsonrpc.MakeClient(settings.Admin.Client.AppointmentsEndpoint)
+
+		data := map[string]interface{}{
+			"signing":    keyPairs.Signing.PublicKey,
+			"encryption": keyPairs.Encryption.PublicKey,
+			"timestamp":  time.Now(),
+		}
+
+		signingKey := settings.Admin.Signing.Key("root")
+
+		if signingKey == nil {
+			services.Log.Fatal("can't find signing key")
+		}
+
+		bytes, err := json.Marshal(data)
+
+		if err != nil {
+			services.Log.Fatal(err)
+		}
+
+		signedData, err := signingKey.SignString(string(bytes))
+
+		if err != nil {
+			services.Log.Fatal(err)
+		}
+
+		request := jsonrpc.MakeRequest("addMediatorPublicKeys", "", signedData.AsMap())
+
+		if response, err := client.Call(request); err != nil {
+			services.Log.Fatal(err)
+		} else {
+			services.Log.Info(response.AsJSON())
+		}
+
+		return nil
+	}
+}
+
 func Admin(settings *services.Settings, db services.Database) ([]cli.Command, error) {
 
 	return []cli.Command{
@@ -140,6 +319,19 @@ func Admin(settings *services.Settings, db services.Database) ([]cli.Command, er
 							Flags:  []cli.Flag{},
 							Usage:  "upload queue data from a file to the backend",
 							Action: uploadQueueData(settings, db),
+						},
+					},
+				},
+				{
+					Name:  "mediators",
+					Flags: []cli.Flag{},
+					Usage: "Mediators-related command.",
+					Subcommands: []cli.Command{
+						{
+							Name:   "upload-keys",
+							Flags:  []cli.Flag{},
+							Usage:  "upload signed keys data for a mediator",
+							Action: uploadMediatorKeys(settings, db),
 						},
 					},
 				},

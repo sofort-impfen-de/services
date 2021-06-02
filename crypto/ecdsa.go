@@ -60,6 +60,14 @@ func (e *ECDSASignature) Serialize() []byte {
 	return append(e.R.Bytes(), e.S.Bytes()...)
 }
 
+func VerifyWithBytes(message, signature, publicKeyData []byte) (bool, error) {
+	if publicKey, err := LoadPublicKey(publicKeyData); err != nil {
+		return false, err
+	} else {
+		return Verify(message, signature, publicKey)
+	}
+}
+
 func Verify(message []byte, signatureBytes []byte, publicKey *ecdsa.PublicKey) (bool, error) {
 	sig := &ECDSASignature{
 		R: &big.Int{},

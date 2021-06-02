@@ -17,11 +17,14 @@
 package servers
 
 import (
+	"bytes"
 	"encoding/json"
 	"github.com/kiebitz-oss/services"
+	"github.com/kiebitz-oss/services/crypto"
 	kbForms "github.com/kiebitz-oss/services/forms"
 	"github.com/kiebitz-oss/services/jsonrpc"
 	"github.com/kiprotect/go-helpers/forms"
+	"strings"
 	"time"
 )
 
@@ -54,6 +57,10 @@ func MakeAppointments(settings *services.AppointmentsSettings, db services.Datab
 		"getQueues": {
 			Form:    &GetQueuesForm,
 			Handler: Appointments.getQueues,
+		},
+		"getQueuesForProvider": {
+			Form:    &GetQueuesForProviderForm,
+			Handler: Appointments.getQueuesForProvider,
 		},
 		"getKeys": {
 			Form:    &GetKeysForm,
@@ -179,51 +186,6 @@ var ConfirmProviderForm = forms.Form{
 	},
 }
 
-var ECDHEncryptedDataForm = forms.Form{
-	Fields: []forms.Field{
-		{
-			Name: "iv",
-			Validators: []forms.Validator{
-				forms.IsBytes{
-					Encoding:  "base64",
-					MinLength: 10,
-					MaxLength: 20,
-				},
-			},
-		},
-		{
-			Name: "iv",
-			Validators: []forms.Validator{
-				forms.IsBytes{
-					Encoding:  "base64",
-					MinLength: 10,
-					MaxLength: 20,
-				},
-			},
-		},
-		{
-			Name: "data",
-			Validators: []forms.Validator{
-				forms.IsBytes{
-					Encoding:  "base64",
-					MinLength: 1,
-					MaxLength: 200000,
-				},
-			},
-		},
-		{
-			Name: "publicKey",
-			Validators: []forms.Validator{
-				forms.IsBytes{
-					Encoding:  "base64",
-					MinLength: 1,
-					MaxLength: 1000,
-				},
-			},
-		},
-	},
-}
-
 var ConfirmProviderDataForm = forms.Form{
 	Fields: []forms.Field{
 		{
@@ -236,7 +198,7 @@ var ConfirmProviderDataForm = forms.Form{
 			Name: "encryptedProviderData",
 			Validators: []forms.Validator{
 				forms.IsStringMap{
-					Form: &ECDHEncryptedDataForm,
+					Form: &kbForms.ECDHEncryptedDataForm,
 				},
 			},
 		},
@@ -333,9 +295,9 @@ type ConfirmProviderParams struct {
 }
 
 type ConfirmProviderData struct {
-	ID                    []byte             `json:"id"`
-	EncryptedProviderData *ECDHEncryptedData `json:"encryptedProviderData"`
-	SignedKeyData         *SignedKeyData     `json:"signedKeyData"`
+	ID                    []byte                      `json:"id"`
+	EncryptedProviderData *services.ECDHEncryptedData `json:"encryptedProviderData"`
+	SignedKeyData         *SignedKeyData              `json:"signedKeyData"`
 }
 
 type SignedKeyData struct {
@@ -350,12 +312,6 @@ type KeyData struct {
 	Encryption []byte   `json:"encryption"`
 	ZipCode    string   `json:"zipCode"`
 	Queues     [][]byte `json:"queues"`
-}
-
-type ECDHEncryptedData struct {
-	IV        []byte `json:"iv"`
-	Data      []byte `json:"data"`
-	PublicKey []byte `json:"publicKey"`
 }
 
 // { id, key, providerData, keyData }, keyPair
@@ -430,15 +386,27 @@ var AddMediatorPublicKeysForm = forms.Form{
 var AddMediatorPublicKeysDataForm = forms.Form{
 	Fields: []forms.Field{
 		{
+			Name: "timestamp",
+			Validators: []forms.Validator{
+				forms.IsTime{
+					Format: "rfc3339",
+				},
+			},
+		},
+		{
 			Name: "encryption",
 			Validators: []forms.Validator{
-				ID,
+				forms.IsBytes{
+					Encoding: "base64",
+				},
 			},
 		},
 		{
 			Name: "signing",
 			Validators: []forms.Validator{
-				ID,
+				forms.IsBytes{
+					Encoding: "base64",
+				},
 			},
 		},
 	},
@@ -452,14 +420,50 @@ type AddMediatorPublicKeysParams struct {
 }
 
 type AddMediatorPublicKeysData struct {
-	Encryption []byte `json:"encryption"`
-	Signing    []byte `json:"signing"`
+	Timestamp  *time.Time `json:"timestamp"`
+	Encryption []byte     `json:"encryption"`
+	Signing    []byte     `json:"signing"`
 }
 
 // { keys }, keyPair
 // add the mediator key to the list of keys (only for testing)
 func (c *Appointments) addMediatorPublicKeys(context *jsonrpc.Context, params *AddMediatorPublicKeysParams) *jsonrpc.Response {
-	return context.NotFound()
+	rootKey := c.settings.Key("root")
+	if rootKey == nil {
+		services.Log.Error("root key missing")
+		return context.InternalError()
+	}
+	if ok, err := rootKey.Verify(&services.SignedData{
+		Data:      []byte(params.JSON),
+		Signature: params.Signature,
+	}); !ok {
+		return context.Error(403, "invalid signature", nil)
+	} else if err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+	if expired(params.Data.Timestamp) {
+		return context.Error(410, "signature expired", nil)
+	}
+	hash := crypto.Hash(params.Data.Signing)
+	keys := c.db.Map("keys", []byte("mediators"))
+	bd, err := json.Marshal(context.Request.Params)
+	if err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+	if err := keys.Set(hash, bd); err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+	if result, err := keys.Get(hash); err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	} else if !bytes.Equal(result, bd) {
+		services.Log.Error("does not match")
+		return context.InternalError()
+	}
+	return context.Acknowledge()
 }
 
 // admin endpoints
@@ -474,7 +478,7 @@ var SetQueuesForm = forms.Form{
 					Key: "json",
 				},
 				forms.IsStringMap{
-					Form: &SetQueuesDataForm,
+					Form: &QueuesDataForm,
 				},
 			},
 		},
@@ -502,7 +506,7 @@ var SetQueuesForm = forms.Form{
 	},
 }
 
-var SetQueuesDataForm = forms.Form{
+var QueuesDataForm = forms.Form{
 	Fields: []forms.Field{
 		{
 			Name: "timestamp",
@@ -528,26 +532,23 @@ var SetQueuesDataForm = forms.Form{
 }
 
 type SetQueuesParams struct {
-	JSON      string         `json:"json"`
-	Data      *SetQueuesData `json:"data"`
-	Signature []byte         `json:"signature"`
-	PublicKey []byte         `json:"publicKey"`
+	JSON      string      `json:"json"`
+	Data      *QueuesData `json:"data"`
+	Signature []byte      `json:"signature"`
+	PublicKey []byte      `json:"publicKey"`
 }
 
-type SetQueuesData struct {
-	Timestamp *time.Time `json:"timestamp"`
-	Qeues     []*Queue   `json:"queues"`
+type QueuesData struct {
+	Timestamp *time.Time        `json:"timestamp"`
+	Queues    []*services.Queue `json:"queues"`
 }
 
-type Queue struct {
-	Name string                 `json:"name"`
-	Type string                 `json:"type"`
-	ID   []byte                 `json:"id"`
-	Data map[string]interface{} `json:"data"`
+// signed requests are valid only 1 minute
+func expired(timestamp *time.Time) bool {
+	return time.Now().Add(-time.Minute).After(*timestamp)
 }
 
 func (c *Appointments) setQueues(context *jsonrpc.Context, params *SetQueuesParams) *jsonrpc.Response {
-	services.Log.Debugf("'setQueues' called")
 	rootKey := c.settings.Key("root")
 	if rootKey == nil {
 		services.Log.Error("root key missing")
@@ -560,6 +561,24 @@ func (c *Appointments) setQueues(context *jsonrpc.Context, params *SetQueuesPara
 		return context.Error(403, "invalid signature", nil)
 	} else if err != nil {
 		services.Log.Error(err)
+		return context.InternalError()
+	}
+	if expired(params.Data.Timestamp) {
+		return context.Error(410, "signature expired", nil)
+	}
+	queues := c.db.Value("queues", []byte("primary"))
+	bd, err := json.Marshal(params.Data)
+	if err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+	if err := queues.Set(bd, 0); err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+	if result, err := queues.Get(); err != nil {
+		return context.InternalError()
+	} else if !bytes.Equal(result, bd) {
 		return context.InternalError()
 	}
 	return context.Acknowledge()
@@ -597,9 +616,55 @@ type GetQueuesParams struct {
 	Radius  int64  `json:"radius"`
 }
 
+func toStringMap(data []byte) (map[string]interface{}, error) {
+	var v map[string]interface{}
+	if err := json.Unmarshal(data, &v); err != nil {
+		return nil, err
+	}
+	return v, nil
+}
+
+func toInterface(data []byte) (interface{}, error) {
+	var v interface{}
+	if err := json.Unmarshal(data, &v); err != nil {
+		return nil, err
+	}
+	return v, nil
+}
+
+func (c *Appointments) getQueuesData() (*QueuesData, error) {
+	queues := c.db.Value("queues", []byte("primary"))
+	if result, err := queues.Get(); err != nil {
+		return nil, err
+	} else if m, err := toStringMap(result); err != nil {
+		return nil, err
+	} else if dataParams, err := QueuesDataForm.Validate(m); err != nil {
+		return nil, err
+	} else {
+		queues := &QueuesData{}
+		if err := QueuesDataForm.Coerce(queues, dataParams); err != nil {
+			return nil, err
+		}
+		return queues, nil
+	}
+}
+
 // { zipCode, radius }
 func (c *Appointments) getQueues(context *jsonrpc.Context, params *GetQueuesParams) *jsonrpc.Response {
-	return context.InternalError()
+	if queues, err := c.getQueuesData(); err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	} else {
+		relevantQueues := []*services.Queue{}
+		for _, queue := range queues.Queues {
+			if queue.Type == "zipArea" && strings.HasPrefix(params.ZipCode, queue.Name) {
+				// we remove the encrypted private key from the queue
+				queue.EncryptedPrivateKey = nil
+				relevantQueues = append(relevantQueues, queue)
+			}
+		}
+		return context.Result(relevantQueues)
+	}
 }
 
 type GetKeysParams struct {
@@ -609,17 +674,97 @@ var GetKeysForm = forms.Form{
 	Fields: []forms.Field{},
 }
 
+type Keys struct {
+	Lists        *KeyLists `json:"lists"`
+	ProviderData []byte    `json:"providerData"`
+	RootKey      []byte    `json:"rootKey"`
+	TokenKey     []byte    `json:"tokenKey"`
+}
+
+type KeyLists struct {
+	Providers []*ActorKey `json:"providers"`
+	Mediators []*ActorKey `json:"mediators"`
+}
+
+type ActorKey struct {
+	Data      string        `json:"data"`
+	Signature []byte        `json:"signature"`
+	PublicKey []byte        `json:"publicKey"`
+	data      *ActorKeyData `json:"-"`
+}
+
+func (a *ActorKey) KeyData() (*ActorKeyData, error) {
+	var akd *ActorKeyData
+	if a.data != nil {
+		return a.data, nil
+	}
+	if err := json.Unmarshal([]byte(a.Data), &akd); err != nil {
+		return nil, err
+	}
+	a.data = akd
+	return akd, nil
+}
+
+type ActorKeyData struct {
+	Encryption []byte     `json:"encryption"`
+	Signing    []byte     `json:"signing"`
+	Timestamp  *time.Time `json:"timestamp"`
+}
+
+func findActorKey(keys []*ActorKey, publicKey []byte) (*ActorKey, error) {
+	for _, key := range keys {
+		if akd, err := key.KeyData(); err != nil {
+			services.Log.Error(err)
+			continue
+		} else if bytes.Equal(akd.Signing, publicKey) {
+			return key, nil
+		}
+	}
+	return nil, nil
+}
+
+func (c *Appointments) getKeysData() (*Keys, error) {
+	mk, err := c.db.Map("keys", []byte("mediators")).GetAll()
+
+	if err != nil {
+		return nil, err
+	}
+
+	mediatorKeys := []*ActorKey{}
+
+	for _, v := range mk {
+		var m *ActorKey
+		if err := json.Unmarshal(v, &m); err != nil {
+			services.Log.Error(err)
+			continue
+		} else {
+			mediatorKeys = append(mediatorKeys, m)
+		}
+	}
+
+	return &Keys{
+		Lists: &KeyLists{
+			Providers: []*ActorKey{},
+			Mediators: mediatorKeys,
+		},
+		ProviderData: c.settings.Key("providerData").PublicKey,
+		RootKey:      c.settings.Key("root").PublicKey,
+		TokenKey:     c.settings.Key("token").PublicKey,
+	}, nil
+
+}
+
 // return all public keys present in the system
 func (c *Appointments) getKeys(context *jsonrpc.Context, params *GetKeysParams) *jsonrpc.Response {
-	return context.Result(map[string]interface{}{
-		"lists": map[string]interface{}{
-			"providers": []map[string]interface{}{},
-			"mediators": []map[string]interface{}{},
-		},
-		"providerData": c.settings.Key("providerData").PublicKey,
-		"rootKey":      c.settings.Key("root").PublicKey,
-		"tokenKey":     c.settings.Key("token").PublicKey,
-	})
+
+	keys, err := c.getKeysData()
+
+	if err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+
+	return context.Result(keys)
 }
 
 // data endpoints
@@ -751,7 +896,16 @@ type GetDataData struct {
 
 // { id }, keyPair
 func (c *Appointments) getData(context *jsonrpc.Context, params *GetDataParams) *jsonrpc.Response {
-	return context.NotFound()
+
+	if data, err := c.db.Value("data", params.Data.ID).Get(); err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	} else if i, err := toInterface(data); err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	} else {
+		return context.Result(i)
+	}
 }
 
 var BulkGetDataForm = forms.Form{
@@ -1035,7 +1189,7 @@ var GetTokenForm = forms.Form{
 			Name: "encryptedData",
 			Validators: []forms.Validator{
 				forms.IsStringMap{
-					Form: &ECDHEncryptedDataForm,
+					Form: &kbForms.ECDHEncryptedDataForm,
 				},
 			},
 		},
@@ -1098,11 +1252,11 @@ var TokenDataForm = forms.Form{
 }
 
 type GetTokenParams struct {
-	Hash            []byte                 `json:"hash"`
-	EncryptedData   *ECDHEncryptedData     `json:"encryptedData"`
-	QueueID         []byte                 `json:"queueID"`
-	QueueData       map[string]interface{} `json:"queueData"`
-	SignedTokenData *SignedTokenData       `json:"signedTokenData"`
+	Hash            []byte                      `json:"hash"`
+	EncryptedData   *services.ECDHEncryptedData `json:"encryptedData"`
+	QueueID         []byte                      `json:"queueID"`
+	QueueData       map[string]interface{}      `json:"queueData"`
+	SignedTokenData *SignedTokenData            `json:"signedTokenData"`
 }
 
 type SignedTokenData struct {
@@ -1283,7 +1437,7 @@ var StoreProviderDataDataForm = forms.Form{
 			Name: "encryptedData",
 			Validators: []forms.Validator{
 				forms.IsStringMap{
-					Form: &ECDHEncryptedDataForm,
+					Form: &kbForms.ECDHEncryptedDataForm,
 				},
 			},
 		},
@@ -1298,37 +1452,21 @@ type StoreProviderDataParams struct {
 }
 
 type StoreProviderDataData struct {
-	ID            []byte             `json:"id"`
-	EncryptedData *ECDHEncryptedData `json:"encryptedData"`
-	Code          string             `json:"code"`
+	ID            []byte                      `json:"id"`
+	EncryptedData *services.ECDHEncryptedData `json:"encryptedData"`
+	Code          string                      `json:"code"`
 }
 
 // { id, encryptedData, code }, keyPair
 func (c *Appointments) storeProviderData(context *jsonrpc.Context, params *StoreProviderDataParams) *jsonrpc.Response {
 
-	/*
-	   const signedData = await sign(
-	       keyPair.privateKey,
-	       JSON.stringify(encryptedData),
-	       keyPair.publicKey
-	   );
+	providerData := c.db.Map("providerData", []byte("unverified"))
 
-	   const result = await this.storeData(
-	       { id: id, data: signedData },
-	       keyPair
-	   );
-	   if (!result) return;
-	   let providerDataList = this.store.get('providers::list');
-	   if (providerDataList === null) providerDataList = [];
-	   for (const pid of providerDataList) {
-	       if (id === pid) return;
-	   }
-	   providerDataList.push(id);
-	   // we update the provider data list
-	   this.store.set('providers::list', providerDataList);
+	if err := providerData.Set(params.Data.ID, []byte(params.JSON)); err != nil {
+		return context.InternalError()
+	}
 
-	*/
-	return context.NotFound()
+	return context.Acknowledge()
 }
 
 var MarkTokenAsUsedForm = forms.Form{
@@ -1422,11 +1560,170 @@ type GetPendingProviderDataParams struct {
 }
 
 type GetPendingProviderDataData struct {
-	Limit int64 `json:"limit"`
+	N int64 `json:"n"`
 }
 
 // mediator-only endpoint
 // { limit }, keyPair
 func (c *Appointments) getPendingProviderData(context *jsonrpc.Context, params *GetPendingProviderDataParams) *jsonrpc.Response {
-	return context.NotFound()
+
+	keys, err := c.getKeysData()
+
+	if err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+
+	providerKey, err := findActorKey(keys.Lists.Mediators, params.PublicKey)
+
+	if err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+
+	if providerKey == nil {
+		return context.Error(403, "not authorized", nil)
+	}
+
+	if ok, err := crypto.VerifyWithBytes([]byte(params.JSON), params.Signature, params.PublicKey); err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	} else if !ok {
+		return context.Error(401, "invalid signature", nil)
+	}
+
+	providerData := c.db.Map("providerData", []byte("unverified"))
+
+	pd, err := providerData.GetAll()
+
+	if err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+
+	pdEntries := []map[string]interface{}{}
+
+	for _, v := range pd {
+		var m map[string]interface{}
+		if err := json.Unmarshal(v, &m); err != nil {
+			services.Log.Error(err)
+			continue
+		} else {
+			pdEntries = append(pdEntries, m)
+		}
+	}
+
+	return context.Result(pdEntries)
+
+}
+
+var GetQueuesForProviderForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "data",
+			Validators: []forms.Validator{
+				forms.IsString{},
+				JSON{
+					Key: "json",
+				},
+				forms.IsStringMap{
+					Form: &GetQueuesForProviderDataForm,
+				},
+			},
+		},
+		{
+			Name: "signature",
+			Validators: []forms.Validator{
+				forms.IsBytes{
+					Encoding:  "base64",
+					MaxLength: 1000,
+					MinLength: 50,
+				},
+			},
+		},
+		{
+			Name: "publicKey",
+			Validators: []forms.Validator{
+				forms.IsOptional{},
+				forms.IsBytes{
+					Encoding:  "base64",
+					MaxLength: 1000,
+					MinLength: 50,
+				},
+			},
+		},
+	},
+}
+
+var GetQueuesForProviderDataForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "queueIDs",
+			Validators: []forms.Validator{
+				forms.IsList{
+					Validators: []forms.Validator{
+						ID,
+					},
+				},
+			},
+		},
+	},
+}
+
+type GetQueuesForProviderParams struct {
+	JSON      string                    `json:"json"`
+	Data      *GetQueuesForProviderData `json:"data"`
+	Signature []byte                    `json:"signature"`
+	PublicKey []byte                    `json:"publicKey"`
+}
+
+type GetQueuesForProviderData struct {
+	QueueIDs [][]byte `json:"queueIDs"`
+}
+
+// mediator-only endpoint
+// { queueIDs }, keyPair
+func (c *Appointments) getQueuesForProvider(context *jsonrpc.Context, params *GetQueuesForProviderParams) *jsonrpc.Response {
+
+	keys, err := c.getKeysData()
+
+	if err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+
+	providerKey, err := findActorKey(keys.Lists.Mediators, params.PublicKey)
+
+	if err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+
+	if providerKey == nil {
+		return context.Error(403, "not authorized", nil)
+	}
+
+	if ok, err := crypto.VerifyWithBytes([]byte(params.JSON), params.Signature, params.PublicKey); err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	} else if !ok {
+		return context.Error(401, "invalid signature", nil)
+	}
+
+	if queues, err := c.getQueuesData(); err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	} else {
+		relevantQueues := []*services.Queue{}
+		for _, queue := range queues.Queues {
+			for _, queueID := range params.Data.QueueIDs {
+				if bytes.Equal(queue.ID, queueID) {
+					relevantQueues = append(relevantQueues, queue)
+					break
+				}
+			}
+		}
+		return context.Result(relevantQueues)
+	}
+
 }

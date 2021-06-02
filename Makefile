@@ -44,6 +44,9 @@ certs:
 extract-keys-for-settings:
 	python3 .scripts/extract_keys_for_settings.py
 
+queues:
+	python3 .scripts/make_queues.py
+
 example-data:
 	@.scripts/generate_example_data.sh
 

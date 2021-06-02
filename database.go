@@ -48,10 +48,11 @@ type Database interface {
 }
 
 type Object interface {
-	Save() error
 }
 
 type Set interface {
+	Set([]byte) error
+	Get() ([]byte, error)
 	Object
 }
 
@@ -64,6 +65,10 @@ type List interface {
 }
 
 type Map interface {
+	GetAll() (map[string][]byte, error)
+	Get(key []byte) ([]byte, error)
+	Del(key []byte) error
+	Set(key []byte, value []byte) error
 	Object
 }
 
