@@ -14,13 +14,17 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-package helpers
+package meters
 
 import (
 	"github.com/kiebitz-oss/services"
-	"github.com/kiebitz-oss/services/servers"
 )
 
-func InitializeAppointmentsServer(settings *services.Settings) (*servers.Appointments, error) {
-	return servers.MakeAppointments(settings)
+var Meters = services.MeterDefinitions{
+	"redis": services.MeterDefinition{
+		Name:              "Redis Meter",
+		Description:       "For Production Use",
+		Maker:             MakeRedis,
+		SettingsValidator: ValidateRedisSettings,
+	},
 }

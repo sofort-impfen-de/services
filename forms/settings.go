@@ -100,6 +100,31 @@ var DatabaseForm = forms.Form{
 	},
 }
 
+var MeterForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "name",
+			Validators: []forms.Validator{
+				forms.IsString{},
+			},
+		},
+		{
+			Name: "type",
+			Validators: []forms.Validator{
+				forms.IsString{},
+				IsValidMeterType{},
+			},
+		},
+		{
+			Name: "settings",
+			Validators: []forms.Validator{
+				forms.IsStringMap{},
+				AreValidMeterSettings{},
+			},
+		},
+	},
+}
+
 var StorageForm = forms.Form{
 	Fields: []forms.Field{
 		{
@@ -259,6 +284,15 @@ var SettingsForm = forms.Form{
 			Validators: []forms.Validator{
 				forms.IsStringMap{
 					Form: &DatabaseForm,
+				},
+			},
+		},
+		{
+			Name: "meter",
+			Validators: []forms.Validator{
+				forms.IsOptional{},
+				forms.IsStringMap{
+					Form: &MeterForm,
 				},
 			},
 		},

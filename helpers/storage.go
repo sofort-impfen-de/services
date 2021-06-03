@@ -21,6 +21,6 @@ import (
 	"github.com/kiebitz-oss/services/servers"
 )
 
-func InitializeStorageServer(settings *services.StorageSettings, database services.Database) (*servers.Storage, error) {
-	return servers.MakeStorage(settings, database)
+func InitializeStorageServer(settings *services.Settings) (*servers.Storage, error) {
+	return servers.MakeStorage(settings)
 }

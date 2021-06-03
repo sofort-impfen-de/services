@@ -55,27 +55,27 @@ func waitAndStop(servers []Server) error {
 	return lastErr
 }
 
-func initializeStorage(settings *services.Settings, db services.Database) (Server, error) {
+func initializeStorage(settings *services.Settings) (Server, error) {
 	services.Log.Debug("Starting storage server...")
 	if settings.Storage == nil {
 		return nil, fmt.Errorf("Storage settings undefined")
 	}
-	return helpers.InitializeStorageServer(settings.Storage, db)
+	return helpers.InitializeStorageServer(settings)
 }
 
-func initializeAppointments(settings *services.Settings, db services.Database) (Server, error) {
+func initializeAppointments(settings *services.Settings) (Server, error) {
 	services.Log.Debug("Starting appointments server...")
 	if settings.Appointments == nil {
 		return nil, fmt.Errorf("Appointments settings undefined")
 	}
-	return helpers.InitializeAppointmentsServer(settings.Appointments, db)
+	return helpers.InitializeAppointmentsServer(settings)
 }
 
-type Initializer func(settings *services.Settings, db services.Database) (Server, error)
+type Initializer func(settings *services.Settings) (Server, error)
 
-func startServer(settings *services.Settings, db services.Database, initializer Initializer) Server {
+func startServer(settings *services.Settings, initializer Initializer) Server {
 
-	server, err := initializer(settings, db)
+	server, err := initializer(settings)
 
 	if err != nil {
 		services.Log.Fatal(err)
@@ -89,17 +89,17 @@ func startServer(settings *services.Settings, db services.Database, initializer 
 
 }
 
-func run(settings *services.Settings, db services.Database, initializers []Initializer) func(c *cli.Context) error {
+func run(settings *services.Settings, initializers []Initializer) func(c *cli.Context) error {
 	return func(c *cli.Context) error {
 		servers := make([]Server, 0)
 		for _, initializer := range initializers {
-			servers = append(servers, startServer(settings, db, initializer))
+			servers = append(servers, startServer(settings, initializer))
 		}
 		return waitAndStop(servers)
 	}
 }
 
-func Run(settings *services.Settings, db services.Database) ([]cli.Command, error) {
+func Run(settings *services.Settings) ([]cli.Command, error) {
 
 	return []cli.Command{
 		{
@@ -112,19 +112,19 @@ func Run(settings *services.Settings, db services.Database) ([]cli.Command, erro
 					Name:   "all",
 					Flags:  []cli.Flag{},
 					Usage:  "Run all servers at once.",
-					Action: run(settings, db, []Initializer{initializeStorage, initializeAppointments}),
+					Action: run(settings, []Initializer{initializeStorage, initializeAppointments}),
 				},
 				{
 					Name:   "storage",
 					Flags:  []cli.Flag{},
 					Usage:  "Run the storage server.",
-					Action: run(settings, db, []Initializer{initializeStorage}),
+					Action: run(settings, []Initializer{initializeStorage}),
 				},
 				{
 					Name:   "appointments",
 					Flags:  []cli.Flag{},
 					Usage:  "Run the appointments server.",
-					Action: run(settings, db, []Initializer{initializeAppointments}),
+					Action: run(settings, []Initializer{initializeAppointments}),
 				},
 			},
 		},

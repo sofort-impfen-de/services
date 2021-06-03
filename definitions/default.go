@@ -20,9 +20,11 @@ import (
 	"github.com/kiebitz-oss/services"
 	"github.com/kiebitz-oss/services/cmd"
 	"github.com/kiebitz-oss/services/databases"
+	"github.com/kiebitz-oss/services/meters"
 )
 
 var Default = services.Definitions{
+	MeterDefinitions:    meters.Meters,
 	DatabaseDefinitions: databases.Databases,
 	CommandsDefinitions: cmd.Commands,
 }

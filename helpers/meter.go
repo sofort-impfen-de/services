@@ -18,9 +18,12 @@ package helpers
 
 import (
 	"github.com/kiebitz-oss/services"
-	"github.com/kiebitz-oss/services/servers"
 )
 
-func InitializeAppointmentsServer(settings *services.Settings) (*servers.Appointments, error) {
-	return servers.MakeAppointments(settings)
+func InitializeMeter(settings *services.Settings) (services.Meter, error) {
+	if settings.Meter == nil {
+		return nil, nil
+	}
+	definition := settings.Definitions.MeterDefinitions[settings.Meter.Type]
+	return definition.Maker(settings.Meter.Settings)
 }
