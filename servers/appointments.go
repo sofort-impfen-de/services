@@ -618,7 +618,7 @@ var CodesDataForm = forms.Form{
 			Name: "actor",
 			Validators: []forms.Validator{
 				forms.IsString{},
-				forms.IsIn{Choices: []interface{}{"provider", "mediator"}},
+				forms.IsIn{Choices: []interface{}{"provider", "user"}},
 			},
 		},
 		{
@@ -627,7 +627,7 @@ var CodesDataForm = forms.Form{
 				forms.IsList{
 					Validators: []forms.Validator{
 						forms.IsBytes{
-							Encoding:  "base64",
+							Encoding:  "hex",
 							MaxLength: 32,
 							MinLength: 16,
 						},
