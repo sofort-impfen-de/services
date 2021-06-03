@@ -56,6 +56,15 @@ kiebitz admin mediators upload-keys data/mediator-keys.json
 
 This should give you a fully functioning backend system. You can e.g. generate `queue-keys.json` and `mediator-keys.json` using the test frontend app.
 
+You can also upload user & provider codes if you want to restrict who can register on the platform (this requires setting `appointments.user_codes_enabled: true` and `appointments.provider_codes.enabled: true`, respectively):
+
+```bash
+# upload user codes from a file
+kiebitz admin codes upload data/user-codes.json
+# upload provider codes from a file
+kiebitz admin codes upload data/provider-codes.json
+```
+
 ## Testing
 
 Here's how you can send a request to the storage server via `curl` (this assumes you have `jq` installed for parsing of the JSON result):

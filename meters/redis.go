@@ -241,6 +241,7 @@ func (r *Redis) getFullIdByTimeId(id string, tId int64, twType string) string {
 	return fmt.Sprintf("%s:%s:%d", id, twType, tId)
 }
 
+// Adds the maximum value from a given UID to a given statistic
 func (r *Redis) AddMax(id string, name string, uid string, data map[string]string, tw services.TimeWindow, value int64) error {
 
 	key, err := r.getKey(name, data, tw)
@@ -293,11 +294,12 @@ func (r *Redis) AddMax(id string, name string, uid string, data map[string]strin
 		return err
 	}
 
-	// the UID hasn't been counted yet, we add it
+	// twe add the difference to the maximum value to the statistic
 	return r.Add(id, name, data, tw, value)
 
 }
 
+// Adds a value from a UID to the statistic, but only once
 func (r *Redis) AddOnce(id string, name string, uid string, data map[string]string, tw services.TimeWindow, value int64) error {
 
 	key, err := r.getKey(name, data, tw)
