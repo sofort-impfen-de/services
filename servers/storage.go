@@ -98,9 +98,6 @@ func (c *Storage) storeSettings(context *jsonrpc.Context, params *StoreSettingsP
 	if err := value.Set(params.Data, time.Duration(c.settings.SettingsTTLDays*24)*time.Hour); err != nil {
 		return context.InternalError()
 	}
-	if err := value.Save(); err != nil {
-		return context.InternalError()
-	}
 	return context.Acknowledge()
 }
 

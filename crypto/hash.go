@@ -14,19 +14,13 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-package services
+package crypto
 
-type Queue struct {
-	Name                string                 `json:"name"`
-	ID                  []byte                 `json:"id"`
-	Type                string                 `json:"type"`
-	Data                map[string]interface{} `json:"data"`
-	PublicKey           []byte                 `json:"publicKey"`
-	EncryptedPrivateKey *ECDHEncryptedData     `json:"encryptedPrivateKey,omitempty"`
-}
+import (
+	"crypto/sha256"
+)
 
-type ECDHEncryptedData struct {
-	IV        []byte `json:"iv"`
-	Data      []byte `json:"data"`
-	PublicKey []byte `json:"publicKey"`
+func Hash(data []byte) []byte {
+	hash := sha256.Sum256(data)
+	return hash[:]
 }

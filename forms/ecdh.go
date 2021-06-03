@@ -20,51 +20,46 @@ import (
 	"github.com/kiprotect/go-helpers/forms"
 )
 
-var QueueForm = forms.Form{
+var ECDHEncryptedDataForm = forms.Form{
 	Fields: []forms.Field{
 		{
-			Name: "id",
+			Name: "iv",
 			Validators: []forms.Validator{
 				forms.IsBytes{
 					Encoding:  "base64",
-					MinLength: 32,
-					MaxLength: 32,
+					MinLength: 10,
+					MaxLength: 20,
 				},
 			},
 		},
 		{
-			Name: "name",
-			Validators: []forms.Validator{
-				forms.IsString{},
-			},
-		},
-		{
-			Name: "publicKey",
+			Name: "iv",
 			Validators: []forms.Validator{
 				forms.IsBytes{
-					Encoding: "base64",
-				},
-			},
-		},
-		{
-			Name: "encryptedPrivateKey",
-			Validators: []forms.Validator{
-				forms.IsStringMap{
-					Form: &ECDHEncryptedDataForm,
+					Encoding:  "base64",
+					MinLength: 10,
+					MaxLength: 20,
 				},
 			},
 		},
 		{
 			Name: "data",
 			Validators: []forms.Validator{
-				forms.IsStringMap{},
+				forms.IsBytes{
+					Encoding:  "base64",
+					MinLength: 1,
+					MaxLength: 200000,
+				},
 			},
 		},
 		{
-			Name: "type",
+			Name: "publicKey",
 			Validators: []forms.Validator{
-				forms.IsString{},
-				forms.IsIn{Choices: []interface{}{"zipArea"}},
+				forms.IsBytes{
+					Encoding:  "base64",
+					MinLength: 1,
+					MaxLength: 1000,
+				},
 			},
 		},
 	},

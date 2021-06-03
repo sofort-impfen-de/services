@@ -217,6 +217,16 @@ var AppointmentsForm = forms.Form{
 			},
 		},
 		{
+			Name: "secret",
+			Validators: []forms.Validator{
+				forms.IsBytes{
+					Encoding:  "base64",
+					MinLength: 16,
+					MaxLength: 64,
+				},
+			},
+		},
+		{
 			Name: "rpc",
 			Validators: []forms.Validator{
 				forms.IsStringMap{

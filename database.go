@@ -48,15 +48,23 @@ type Database interface {
 }
 
 type Object interface {
-	Save() error
 }
 
 type Set interface {
+	Set([]byte) error
+	Get() ([]byte, error)
 	Object
+}
+
+type SortedSetEntry struct {
+	Score int64
+	Data  []byte
 }
 
 type SortedSet interface {
 	Object
+	Add([]byte, int64) error
+	PopMin(int64) ([]*SortedSetEntry, error)
 }
 
 type List interface {
@@ -64,6 +72,10 @@ type List interface {
 }
 
 type Map interface {
+	GetAll() (map[string][]byte, error)
+	Get(key []byte) ([]byte, error)
+	Del(key []byte) error
+	Set(key []byte, value []byte) error
 	Object
 }
 
