@@ -34,6 +34,28 @@ kiebitz run mediator
 kiebitz run storage
 ```
 
+## Provisioning
+
+For a working system you will need queue data and cryptographic keys. You can generate queues for all zip codes using the `make_queues.py` command to which you pass a file with the encrypted queue keys:
+
+```bash
+python3 .scripts/make_queues.py data/queue-keys.json
+```
+
+This will generate `queues.json` files in `settings/dev` and `settings/prod`. You can then sign and upload these to the backend via the `admin` command:
+
+```bash
+kiebitz admin queues upload settings/dev/queues.json
+```
+
+Likewise, you need to store signed mediator key pairs in the backend, which you can do via
+
+```bash
+kiebitz admin mediators upload-keys data/mediator-keys.json
+```
+
+This should give you a fully functioning backend system. You can e.g. generate `queue-keys.json` and `mediator-keys.json` using the test frontend app.
+
 ## Testing
 
 Here's how you can send a request to the storage server via `curl` (this assumes you have `jq` installed for parsing of the JSON result):
