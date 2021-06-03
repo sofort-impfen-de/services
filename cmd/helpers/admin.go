@@ -27,6 +27,105 @@ import (
 	"time"
 )
 
+var CodesForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "actor",
+			Validators: []forms.Validator{
+				forms.IsIn{Choices: []interface{}{"provider", "user"}},
+			},
+		},
+		{
+			Name: "codes",
+			Validators: []forms.Validator{
+				forms.IsList{
+					Validators: []forms.Validator{
+						forms.IsHex{
+							ConvertToBinary: false,
+							Strict:          true,
+							MinLength:       16,
+							MaxLength:       32,
+						},
+					},
+				},
+			},
+		},
+	},
+}
+
+type Codes struct {
+	Actor     string     `json:"actor"`
+	Codes     []string   `json:"codes"`
+	Timestamp *time.Time `json:"timestamp"`
+}
+
+func uploadCodes(settings *services.Settings) func(c *cli.Context) error {
+	return func(c *cli.Context) error {
+
+		if settings.Admin == nil {
+			services.Log.Fatal("admin settings missing")
+		}
+
+		filename := c.Args().Get(0)
+
+		if filename == "" {
+			services.Log.Fatal("please specify a filename")
+		}
+
+		jsonBytes, err := ioutil.ReadFile(filename)
+
+		if err != nil {
+			services.Log.Fatal(err)
+		}
+
+		t := time.Now()
+		codes := &Codes{
+			Timestamp: &t,
+		}
+		var rawCodes map[string]interface{}
+
+		if err := json.Unmarshal(jsonBytes, &rawCodes); err != nil {
+			services.Log.Fatal(err)
+		}
+
+		if params, err := CodesForm.Validate(rawCodes); err != nil {
+			services.Log.Fatal(err)
+		} else if CodesForm.Coerce(codes, params); err != nil {
+			services.Log.Fatal(err)
+		}
+
+		client := jsonrpc.MakeClient(settings.Admin.Client.AppointmentsEndpoint)
+
+		signingKey := settings.Admin.Signing.Key("root")
+
+		if signingKey == nil {
+			services.Log.Fatal("can't find signing key")
+		}
+
+		bytes, err := json.Marshal(codes)
+
+		if err != nil {
+			services.Log.Fatal(err)
+		}
+
+		signedData, err := signingKey.SignString(string(bytes))
+
+		if err != nil {
+			services.Log.Fatal(err)
+		}
+
+		request := jsonrpc.MakeRequest("addCodes", "", signedData.AsMap())
+
+		if response, err := client.Call(request); err != nil {
+			services.Log.Fatal(err)
+		} else {
+			services.Log.Info(response.AsJSON())
+		}
+
+		return nil
+	}
+}
+
 var QueuesForm = forms.Form{
 	Fields: []forms.Field{
 		{
@@ -309,6 +408,19 @@ func Admin(settings *services.Settings) ([]cli.Command, error) {
 			Flags:   []cli.Flag{},
 			Usage:   "Administrative functions.",
 			Subcommands: []cli.Command{
+				{
+					Name:  "codes",
+					Flags: []cli.Flag{},
+					Usage: "Codes-related command.",
+					Subcommands: []cli.Command{
+						{
+							Name:   "upload",
+							Flags:  []cli.Flag{},
+							Usage:  "upload codes from a file to the backend",
+							Action: uploadCodes(settings),
+						},
+					},
+				},
 				{
 					Name:  "queues",
 					Flags: []cli.Flag{},
