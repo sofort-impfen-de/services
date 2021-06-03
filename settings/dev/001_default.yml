@@ -1,4 +1,11 @@
 name: kiebitz
+meter:
+  name: meter
+  type: redis
+  settings:
+    addresses: ["localhost:6379"]
+    database: 1
+    password: ""
 database:
   name: db
   type: redis
@@ -25,6 +32,8 @@ admin:
     appointments_endpoint: "http://localhost:8888/jsonrpc"
     storage_endpoint: "http://localhost:9999/jsonrpc"
 appointments:
+  user_codes_enabled: false
+  provider_codes_enabled: false
   secret: 71Bh6CloULt/iOFVB9MDQUsEyOc4lcTGRtv+E6eaKVY=
   keys: []
   rpc:

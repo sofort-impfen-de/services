@@ -17,6 +17,7 @@
 package meters
 
 import (
+	"encoding/binary"
 	"fmt"
 	"github.com/go-redis/redis"
 	"github.com/kiebitz-oss/services"
@@ -238,6 +239,96 @@ func (r *Redis) getFullId(id string, tw services.TimeWindow) string {
 func (r *Redis) getFullIdByTimeId(id string, tId int64, twType string) string {
 	// we group meter values for a given ID by day
 	return fmt.Sprintf("%s:%s:%d", id, twType, tId)
+}
+
+func (r *Redis) AddMax(id string, name string, uid string, data map[string]string, tw services.TimeWindow, value int64) error {
+
+	key, err := r.getKey(name, data, tw)
+
+	if err != nil {
+		return err
+	}
+
+	fullId := r.getFullId(id, tw)
+	fullKey := fmt.Sprintf("addMax:%s:%s", fullId, key)
+
+	if oldValueBytes, err := r.client.HGet(fullKey, uid).Result(); err != nil {
+		if err != redis.Nil {
+			return err
+		} else {
+			// the value doesn't exist yet, we store the current value
+			bs := make([]byte, 8)
+			binary.LittleEndian.PutUint64(bs, uint64(value))
+			if err := r.client.HSet(fullKey, uid, bs).Err(); err != nil {
+				return err
+			}
+
+		}
+	} else {
+		var oldValue uint64
+		if err == nil {
+			oldValue = binary.LittleEndian.Uint64([]byte(oldValueBytes))
+		}
+		if int64(oldValue) >= value {
+			// the old value is larger than the current value, we do nothing
+			return nil
+		} else {
+			// the new value is larger than the old one, we store it as the
+			// new maximum and add the difference
+			bs := make([]byte, 8)
+			binary.LittleEndian.PutUint64(bs, uint64(value))
+			if err := r.client.HSet(fullKey, uid, bs).Err(); err != nil {
+				return err
+			}
+			// we subtract the old value
+			value = value - int64(oldValue)
+		}
+	}
+
+	// we set the expiration time of the control structure
+	tId := r.getTimeId(tw.From, tw.Type)
+	maxTw := r.getTimeWindowFromTimeId(r.increaseTimeId(tId, 10, tw.Type), tw.Type)
+
+	if _, err := r.client.ExpireAt(fullKey, time.Unix(maxTw.To/1e9, 0)).Result(); err != nil {
+		return err
+	}
+
+	// the UID hasn't been counted yet, we add it
+	return r.Add(id, name, data, tw, value)
+
+}
+
+func (r *Redis) AddOnce(id string, name string, uid string, data map[string]string, tw services.TimeWindow, value int64) error {
+
+	key, err := r.getKey(name, data, tw)
+
+	if err != nil {
+		return err
+	}
+
+	fullId := r.getFullId(id, tw)
+	fullKey := fmt.Sprintf("addOnce:%s:%s", fullId, key)
+
+	if ok, err := r.client.SIsMember(fullKey, uid).Result(); err != nil {
+		return err
+	} else if ok {
+		// the UID has already been counted
+		return nil
+	}
+
+	tId := r.getTimeId(tw.From, tw.Type)
+	maxTw := r.getTimeWindowFromTimeId(r.increaseTimeId(tId, 10, tw.Type), tw.Type)
+
+	if _, err := r.client.ExpireAt(fullKey, time.Unix(maxTw.To/1e9, 0)).Result(); err != nil {
+		return err
+	}
+
+	if err := r.client.SAdd(fullKey, uid).Err(); err != nil {
+		return err
+	}
+	// the UID hasn't been counted yet, we add it
+	return r.Add(id, name, data, tw, value)
+
 }
 
 func (r *Redis) Add(id string, name string, data map[string]string, tw services.TimeWindow, value int64) error {
