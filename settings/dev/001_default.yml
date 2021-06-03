@@ -29,12 +29,12 @@ admin:
   signing:
     keys: []
   client:
+    #appointments_endpoint: "https://appointments.sofort-impfen.de/jsonrpc"
     appointments_endpoint: "http://localhost:8888/jsonrpc"
     storage_endpoint: "http://localhost:9999/jsonrpc"
 appointments:
   user_codes_enabled: false
   provider_codes_enabled: false
-  secret: 71Bh6CloULt/iOFVB9MDQUsEyOc4lcTGRtv+E6eaKVY=
   keys: []
   rpc:
     bind_address: localhost:8888
