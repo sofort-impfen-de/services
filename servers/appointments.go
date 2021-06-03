@@ -21,13 +21,17 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"github.com/kiebitz-oss/services"
 	"github.com/kiebitz-oss/services/crypto"
 	"github.com/kiebitz-oss/services/databases"
 	kbForms "github.com/kiebitz-oss/services/forms"
 	"github.com/kiebitz-oss/services/jsonrpc"
 	"github.com/kiprotect/go-helpers/forms"
+	"regexp"
+	"sort"
 	"strings"
 	"time"
 )
@@ -35,6 +39,7 @@ import (
 type Appointments struct {
 	server   *jsonrpc.JSONRPCServer
 	db       services.Database
+	meter    services.Meter
 	settings *services.AppointmentsSettings
 }
 
@@ -42,6 +47,7 @@ func MakeAppointments(settings *services.Settings) (*Appointments, error) {
 
 	Appointments := &Appointments{
 		db:       settings.DatabaseObj,
+		meter:    settings.MeterObj,
 		settings: settings.Appointments,
 	}
 
@@ -69,6 +75,10 @@ func MakeAppointments(settings *services.Settings) (*Appointments, error) {
 		"addCodes": {
 			Form:    &AddCodesForm,
 			Handler: Appointments.addCodes,
+		},
+		"getStats": {
+			Form:    &GetStatsForm,
+			Handler: Appointments.getStats,
 		},
 		"getKeys": {
 			Form:    &GetKeysForm,
@@ -364,18 +374,6 @@ func (c *Appointments) confirmProvider(context *jsonrpc.Context, params *Confirm
 		return resp
 	}
 
-	/*
-		if data, err := .Get(); err != nil {
-			services.Log.Error(err)
-			return context.InternalError()
-		} else if i, err := toInterface(data); err != nil {
-			services.Log.Error(err)
-			return context.InternalError()
-		} else {
-			return context.Result(i)
-		}
-	*/
-
 	hash := crypto.Hash(params.Data.SignedKeyData.Data.Signing)
 	keys := c.db.Map("keys", []byte("providers"))
 
@@ -414,31 +412,6 @@ func (c *Appointments) confirmProvider(context *jsonrpc.Context, params *Confirm
 		services.Log.Error(err)
 		return context.InternalError()
 	}
-
-	/*
-	   let found = false;
-	   const keyDataJSON = JSON.parse(signedKeyData.data);
-	   const newProviders = [];
-	   for (const existingKey of this.keys.providers) {
-	       const existingKeyDataJSON = JSON.parse(existingKey.data);
-	       if (existingKeyDataJSON.signing === keyDataJSON.signing) {
-	           found = true;
-	           newProviders.push(signedKeyData);
-	       } else {
-	           newProviders.push(existingKey);
-	       }
-	   }
-	   if (!found) newProviders.push(signedKeyData);
-	   this.keys.providers = newProviders;
-	   this.store.set('keys', this.keys);
-	   // we store the verified provider data
-	   const result = await this.storeData(
-	       { id, data: signedProviderData },
-	       keyPair
-	   );
-	   if (!result) return;
-	   return {};
-	*/
 
 	return context.Acknowledge()
 }
@@ -1753,6 +1726,13 @@ type Capacity struct {
 	Properties map[string]interface{} `json:"properties"`
 }
 
+var tws = []services.TimeWindowFunc{
+	services.Minute,
+	services.Hour,
+	services.Day,
+	services.Week,
+}
+
 // { capacities }, keyPair
 // get n tokens from the given queue IDs
 func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueueTokensParams) *jsonrpc.Response {
@@ -1773,13 +1753,10 @@ func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueue
 		return context.InternalError()
 	}
 
-	/*
-		- We want to store how many tokens providers have been querying and record data about queues
-		  and other properties (e.g. vaccine types)
-	*/
-
+	var totalCapacity, totalTokens int64
 	// to do: better balancing and check queue data
 	for _, capacity := range params.Data.Capacities {
+		totalCapacity += capacity.N
 		tokens := []*QueueToken{}
 		for len(tokens) < int(capacity.N) {
 			addedTokens := 0
@@ -1810,87 +1787,51 @@ func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueue
 				break
 			}
 		}
+		totalTokens += int64(len(tokens))
 		allTokens = append(allTokens, tokens)
+	}
+
+	if c.meter != nil {
+
+		// by convention all values in the meter DB are hex-encoded
+		uid := hex.EncodeToString(crypto.Hash(params.PublicKey))
+
+		now := time.Now().UTC().UnixNano()
+
+		addTokenStats := func(tw services.TimeWindow, data map[string]string) error {
+			if err := c.meter.AddMax("queues", "tokens", uid, data, tw, totalTokens); err != nil {
+				return err
+			}
+
+			if err := c.meter.AddMax("queues", "capacities", uid, data, tw, totalCapacity); err != nil {
+				return err
+			}
+			return nil
+		}
+
+		for _, twt := range tws {
+
+			// generate the time window
+			tw := twt(now)
+
+			// global statistics
+			if err := addTokenStats(tw, map[string]string{}); err != nil {
+				services.Log.Error(err)
+			}
+
+			// statistics by zip code
+			if err := addTokenStats(tw, map[string]string{
+				"zipCode": pkd.ZipCode,
+			}); err != nil {
+				services.Log.Error(err)
+			}
+
+		}
+
 	}
 
 	return context.Result(allTokens)
 }
-
-/*
-   const providerKeyData = await this._getProviderKeyData(
-       keyPair.publicKey
-   );
-
-   if (providerKeyData === null) return null;
-
-   // to do: verify signature against the official key
-
-   // we update the tokens
-   this.tokens = this.store.get('tokens', {});
-   const queueIDs = providerKeyData.queues;
-   const zipCode = providerKeyData.zipCode;
-   const allTokens = [];
-   const allTokensFlat = [];
-   // we shuffle the queue IDs to avoid starvation of individual queues
-   shuffle(queueIDs);
-   // we also always remove just one token from every eligible list to
-   // avoid starvation of individual lists of tokens...
-   for (const capacity of capacities) {
-       const tokens = [];
-       const { n, properties } = capacity;
-       tokenLoop: while (tokens.length < n) {
-           let addedTokens = 0;
-           queuesLoop: for (const queueID of queueIDs) {
-               let queueTokens = this.tokens[queueID];
-               // no tokens in this queue
-               if (queueTokens === undefined || queueTokens.length === 0)
-                   continue queuesLoop;
-               // we iterate through the tokens in the queue
-               candidates: for (let i = 0; i < queueTokens.length; i++) {
-                   const token = queueTokens[i];
-                   if (
-                       this._distance(token.queueData.zipCode, zipCode) >
-                       token.queueData.distance
-                   )
-                       continue candidates; // the distance between user and provider is too large
-                   for (let [k, v] of Object.entries(properties)) {
-                       if (
-                           token.queueData[k] !== undefined &&
-                           token.queueData[k] !== v
-                       )
-                           continue candidates; // this token doesn't match the given properties
-                   }
-                   // we have found a suitable token
-                   queueTokens = queueTokens.filter((t, j) => i !== j);
-                   this.tokens[queueID] = queueTokens;
-                   const tokenCopy = copy(token);
-                   tokenCopy.queue = queueID;
-                   tokens.push(tokenCopy);
-                   addedTokens++;
-                   break candidates;
-               }
-               // we've got enough tokens for this capacity specifier
-               if (tokens.length === n) break tokenLoop;
-           }
-           // there are no more eligible tokens
-           if (addedTokens === 0) break tokenLoop;
-       }
-       allTokens.push(tokens);
-       for (const token of tokens) allTokensFlat.push(token);
-   }
-
-   const selectedTokens = [
-       ...this.store.get('selectedTokens', []),
-       ...allTokensFlat,
-   ];
-
-   // we persist the changes
-   this.store.set('selectedTokens', selectedTokens);
-   this.store.set('tokens', this.tokens);
-
-   // no more tokens left
-   return copy(allTokens);
-*/
 
 var StoreProviderDataForm = forms.Form{
 	Fields: []forms.Field{
@@ -2261,4 +2202,164 @@ func (c *Appointments) getQueuesForProvider(context *jsonrpc.Context, params *Ge
 		return context.Result(relevantQueues)
 	}
 
+}
+
+// stats endpoint
+
+func UsageValidator(values map[string]interface{}, addError forms.ErrorAdder) error {
+	if values["from"] != nil && values["to"] == nil || values["to"] != nil && values["from"] == nil {
+		return fmt.Errorf("both from and to must be specified")
+	}
+	if values["from"] != nil && values["n"] != nil {
+		return fmt.Errorf("cannot specify both n and from/to")
+	}
+	if values["n"] == nil && values["from"] == nil {
+		return fmt.Errorf("you need to specify either n or from/to")
+	}
+	if values["from"] != nil {
+		fromT := values["from"].(time.Time)
+		toT := values["to"].(time.Time)
+		if fromT.UnixNano() > toT.UnixNano() {
+			return fmt.Errorf("from date must be before to date")
+		}
+	}
+	return nil
+}
+
+var GetStatsForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "id",
+			Validators: []forms.Validator{
+				forms.IsIn{Choices: []interface{}{"queues"}},
+			},
+		},
+		{
+			Name: "type",
+			Validators: []forms.Validator{
+				forms.IsIn{Choices: []interface{}{"minute", "hour", "day", "week", "month"}},
+			},
+		},
+		{
+			Name: "name",
+			Validators: []forms.Validator{
+				forms.IsOptional{Default: ""},
+				forms.MatchesRegex{Regex: regexp.MustCompile(`^[\w\d\-]{0,50}$`)},
+			},
+		},
+		{
+			Name: "from",
+			Validators: []forms.Validator{
+				forms.IsOptional{},
+				forms.IsTime{Format: "rfc3339", ToUTC: true},
+			},
+		},
+		{
+			Name: "to",
+			Validators: []forms.Validator{
+				forms.IsOptional{},
+				forms.IsTime{Format: "rfc3339", ToUTC: true},
+			},
+		},
+		{
+			Name: "n",
+			Validators: []forms.Validator{
+				forms.IsOptional{},
+				forms.IsInteger{HasMin: true, Min: 1, HasMax: true, Max: 500, Convert: true},
+			},
+		},
+	},
+	Transforms: []forms.Transform{},
+	Validator:  UsageValidator,
+}
+
+type GetStatsParams struct {
+	ID   string     `json:"id"`
+	Type string     `json:"type"`
+	Name string     `json:"name"`
+	From *time.Time `json:"from"`
+	To   *time.Time `json:"to"`
+	N    *int64     `json:"n"`
+}
+
+type StatsValue struct {
+	Name  string            `json:"name"`
+	From  time.Time         `json:"from"`
+	To    time.Time         `json:"to"`
+	Data  map[string]string `json:"data"`
+	Value int64             `json:"value"`
+}
+
+type Values struct {
+	values []*StatsValue
+}
+
+func (f Values) Len() int {
+	return len(f.values)
+}
+
+func (f Values) Less(i, j int) bool {
+	r := (f.values[i].From).Sub(f.values[j].From)
+	if r < 0 {
+		return true
+	}
+	// if the from times match we compare the names
+	if r == 0 {
+		if strings.Compare(f.values[i].Name, f.values[j].Name) < 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func (f Values) Swap(i, j int) {
+	f.values[i], f.values[j] = f.values[j], f.values[i]
+
+}
+
+// public endpoint
+func (c *Appointments) getStats(context *jsonrpc.Context, params *GetStatsParams) *jsonrpc.Response {
+
+	if c.meter == nil {
+		return context.InternalError()
+	}
+
+	toTime := time.Now().UTC().UnixNano()
+
+	var metrics []*services.Metric
+	var err error
+
+	if params.N != nil {
+		metrics, err = c.meter.N(params.ID, toTime, *params.N, params.Name, params.Type)
+	} else {
+		metrics, err = c.meter.Range(params.ID, params.From.UnixNano(), params.To.UnixNano(), params.Name, params.Type)
+	}
+
+	if err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+
+	values := make([]*StatsValue, 0)
+
+	for _, metric := range metrics {
+		if metric.Name[0] == '_' {
+			// we skip internal metrics (which start with a '_')
+			continue
+		}
+
+		values = append(values, &StatsValue{
+			From:  time.Unix(metric.TimeWindow.From/1e9, metric.TimeWindow.From%1e9).UTC(),
+			To:    time.Unix(metric.TimeWindow.To/1e9, metric.TimeWindow.From%1e9).UTC(),
+			Name:  metric.Name,
+			Value: metric.Value,
+			Data:  metric.Data,
+		})
+	}
+
+	// we store the statistics
+	sortableValues := Values{values: values}
+	sort.Sort(sortableValues)
+
+	return context.Result(values)
 }

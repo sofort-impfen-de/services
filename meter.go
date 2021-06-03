@@ -36,6 +36,10 @@ type Metric struct {
 type Meter interface {
 	// Add the given value to the metric
 	Add(id string, name string, data map[string]string, tw TimeWindow, value int64) error
+	// Add the given value to the metric, but only if the given uid hasn't been counted yet
+	AddOnce(id string, name string, uid string, data map[string]string, tw TimeWindow, value int64) error
+	// Add the maximum value to the metric
+	AddMax(id string, name string, uid string, data map[string]string, tw TimeWindow, value int64) error
 	// Return the metric and its assigned quota
 	Get(id string, name string, data map[string]string, tw TimeWindow) (*Metric, error)
 	// Return metrics for a given ID and time interval
