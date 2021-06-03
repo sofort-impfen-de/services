@@ -30,8 +30,9 @@ type StorageSettings struct {
 }
 
 type AppointmentsSettings struct {
-	RPC  *JSONRPCServerSettings `json:"rpc"`
-	Keys []*Key                 `json:"keys"`
+	RPC    *JSONRPCServerSettings `json:"rpc"`
+	Keys   []*Key                 `json:"keys"`
+	Secret []byte                 `json:"secret"`
 }
 
 func (a *AppointmentsSettings) Key(name string) *Key {

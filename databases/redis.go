@@ -127,7 +127,10 @@ func (d *Redis) Set(table string, key []byte) services.Set {
 	return nil
 }
 func (d *Redis) SortedSet(table string, key []byte) services.SortedSet {
-	return nil
+	return &RedisSortedSet{
+		db:      d,
+		fullKey: d.fullKey(table, key),
+	}
 }
 
 func (d *Redis) List(table string, key []byte) services.List {
@@ -164,6 +167,9 @@ func (r *RedisMap) Del(key []byte) error {
 func (r *RedisMap) GetAll() (map[string][]byte, error) {
 	result, err := r.db.Client.HGetAll(string(r.fullKey)).Result()
 	if err != nil {
+		if err == redis.Nil {
+			return nil, NotFound
+		}
 		return nil, err
 	}
 	byteMap := map[string][]byte{}
@@ -176,6 +182,9 @@ func (r *RedisMap) GetAll() (map[string][]byte, error) {
 func (r *RedisMap) Get(key []byte) ([]byte, error) {
 	result, err := r.db.Client.HGet(string(r.fullKey), string(key)).Result()
 	if err != nil {
+		if err == redis.Nil {
+			return nil, NotFound
+		}
 		return nil, err
 	}
 	return []byte(result), nil
@@ -197,9 +206,36 @@ func (r *RedisValue) Set(data []byte, ttl time.Duration) error {
 func (r *RedisValue) Get() ([]byte, error) {
 	result, err := r.db.Client.Get(string(r.fullKey)).Result()
 	if err != nil {
+		if err == redis.Nil {
+			return nil, NotFound
+		}
 		return nil, err
 	}
 	return []byte(result), nil
+}
+
+type RedisSortedSet struct {
+	db      *Redis
+	fullKey []byte
+}
+
+func (r *RedisSortedSet) Add(data []byte, score int64) error {
+	return r.db.Client.ZAdd(string(r.fullKey), redis.Z{Score: float64(score), Member: string(data)}).Err()
+}
+
+func (r *RedisSortedSet) PopMin(n int64) ([]*services.SortedSetEntry, error) {
+	result, err := r.db.Client.ZPopMin(string(r.fullKey), n).Result()
+	if err != nil {
+		return nil, err
+	}
+	entries := []*services.SortedSetEntry{}
+	for _, z := range result {
+		entries = append(entries, &services.SortedSetEntry{
+			Score: int64(z.Score),
+			Data:  []byte(z.Member.(string)),
+		})
+	}
+	return entries, nil
 }
 
 /*

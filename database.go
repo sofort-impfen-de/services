@@ -56,8 +56,15 @@ type Set interface {
 	Object
 }
 
+type SortedSetEntry struct {
+	Score int64
+	Data  []byte
+}
+
 type SortedSet interface {
 	Object
+	Add([]byte, int64) error
+	PopMin(int64) ([]*SortedSetEntry, error)
 }
 
 type List interface {
