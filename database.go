@@ -51,8 +51,9 @@ type Object interface {
 }
 
 type Set interface {
-	Set([]byte) error
-	Get() ([]byte, error)
+	Add([]byte) error
+	Has([]byte) (bool, error)
+	Del(key []byte) error
 	Object
 }
 
@@ -83,6 +84,7 @@ type Value interface {
 	Object
 	Set(value []byte, ttl time.Duration) error
 	Get() ([]byte, error)
+	Del() error
 }
 
 type BaseDatabase struct {

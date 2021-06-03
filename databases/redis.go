@@ -124,7 +124,10 @@ func (d *Redis) Rollback() error {
 }
 
 func (d *Redis) Set(table string, key []byte) services.Set {
-	return nil
+	return &RedisSet{
+		db:      d,
+		fullKey: d.fullKey(table, key),
+	}
 }
 func (d *Redis) SortedSet(table string, key []byte) services.SortedSet {
 	return &RedisSortedSet{
@@ -194,6 +197,23 @@ func (r *RedisMap) Set(key []byte, value []byte) error {
 	return r.db.Client.HSet(string(r.fullKey), string(key), string(value)).Err()
 }
 
+type RedisSet struct {
+	db      *Redis
+	fullKey []byte
+}
+
+func (r *RedisSet) Add(data []byte) error {
+	return r.db.Client.SAdd(string(r.fullKey), string(data)).Err()
+}
+
+func (r *RedisSet) Has(data []byte) (bool, error) {
+	return r.db.Client.SIsMember(string(r.fullKey), string(data)).Result()
+}
+
+func (r *RedisSet) Del(data []byte) error {
+	return r.db.Client.SRem(string(r.fullKey), string(data)).Err()
+}
+
 type RedisValue struct {
 	db      *Redis
 	fullKey []byte
@@ -212,6 +232,10 @@ func (r *RedisValue) Get() ([]byte, error) {
 		return nil, err
 	}
 	return []byte(result), nil
+}
+
+func (r *RedisValue) Del() error {
+	return r.db.Client.Del(string(r.fullKey)).Err()
 }
 
 type RedisSortedSet struct {

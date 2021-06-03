@@ -149,7 +149,12 @@ var DeleteSettingsForm = forms.Form{
 }
 
 func (c *Storage) deleteSettings(context *jsonrpc.Context, params *GetSettingsParams) *jsonrpc.Response {
-	return context.InternalError()
+	value := c.db.Value("settings", params.ID)
+	if err := value.Del(); err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+	return context.Acknowledge()
 }
 
 func (c *Storage) Start() error {
