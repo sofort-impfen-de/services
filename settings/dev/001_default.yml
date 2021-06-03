@@ -10,6 +10,10 @@ storage:
   settings_ttl_days: 60
   rpc:
     bind_address: localhost:9999
+    cors:
+      allowed_hosts: ["http://localhost:8080"]
+      allowed_headers: ["*"]
+      allowed_methods: ["POST"]
     #tls:
     #  ca_certificate_file: "$DIR/certs/root.crt"
     #  certificate_file: "$DIR/certs/storage-1.crt"
