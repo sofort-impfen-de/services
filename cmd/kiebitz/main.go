@@ -30,12 +30,14 @@ func Settings(definitions *services.Definitions) (*services.Settings, error) {
 
 func main() {
 	if settings, err := Settings(&definitions.Default); err != nil {
-		services.Log.Error(err)
-		return
+		services.Log.Fatal(err)
 	} else if db, err := helpers.InitializeDatabase(settings); err != nil {
-		services.Log.Error(err)
-		return
+		services.Log.Fatal(err)
+	} else if meter, err := helpers.InitializeMeter(settings); err != nil {
+		services.Log.Fatal(err)
 	} else {
-		cmdHelpers.CLI(settings, db)
+		settings.DatabaseObj = db
+		settings.MeterObj = meter
+		cmdHelpers.CLI(settings)
 	}
 }

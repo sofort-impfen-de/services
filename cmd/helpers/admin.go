@@ -48,7 +48,7 @@ type Queues struct {
 	Queues []*services.Queue `json:"queues"`
 }
 
-func uploadQueueData(settings *services.Settings, db services.Database) func(c *cli.Context) error {
+func uploadQueueData(settings *services.Settings) func(c *cli.Context) error {
 	return func(c *cli.Context) error {
 
 		if settings.Admin == nil {
@@ -230,7 +230,7 @@ type JWKPrivateKey struct {
 	Y      string   `json:"y"`
 }
 
-func uploadMediatorKeys(settings *services.Settings, db services.Database) func(c *cli.Context) error {
+func uploadMediatorKeys(settings *services.Settings) func(c *cli.Context) error {
 	return func(c *cli.Context) error {
 
 		if settings.Admin == nil {
@@ -300,7 +300,7 @@ func uploadMediatorKeys(settings *services.Settings, db services.Database) func(
 	}
 }
 
-func Admin(settings *services.Settings, db services.Database) ([]cli.Command, error) {
+func Admin(settings *services.Settings) ([]cli.Command, error) {
 
 	return []cli.Command{
 		{
@@ -318,7 +318,7 @@ func Admin(settings *services.Settings, db services.Database) ([]cli.Command, er
 							Name:   "upload",
 							Flags:  []cli.Flag{},
 							Usage:  "upload queue data from a file to the backend",
-							Action: uploadQueueData(settings, db),
+							Action: uploadQueueData(settings),
 						},
 					},
 				},
@@ -331,7 +331,7 @@ func Admin(settings *services.Settings, db services.Database) ([]cli.Command, er
 							Name:   "upload-keys",
 							Flags:  []cli.Flag{},
 							Usage:  "upload signed keys data for a mediator",
-							Action: uploadMediatorKeys(settings, db),
+							Action: uploadMediatorKeys(settings),
 						},
 					},
 				},

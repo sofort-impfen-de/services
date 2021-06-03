@@ -26,5 +26,5 @@ type CommandsDefinition struct {
 	Maker       CommandsMaker `json:"-"`
 }
 
-type CommandsMaker func(settings *Settings, db Database) ([]cli.Command, error)
+type CommandsMaker func(settings *Settings) ([]cli.Command, error)
 type CommandsDefinitions []CommandsDefinition

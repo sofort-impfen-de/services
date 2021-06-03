@@ -134,12 +134,20 @@ type DatabaseSettings struct {
 	Settings interface{}
 }
 
+type MeterSettings struct {
+	Type     string `json:"type"`
+	Settings interface{}
+}
+
 type Settings struct {
 	Admin        *AdminSettings        `json:"admin"`
 	Definitions  *Definitions          `json:"definitions"`
 	Storage      *StorageSettings      `json:"storage"`
 	Appointments *AppointmentsSettings `json:"appointments"`
 	Database     *DatabaseSettings     `json:"database"`
+	Meter        *MeterSettings        `json:"meter"`
+	DatabaseObj  Database              `json:"-"`
+	MeterObj     Meter                 `json:"-"`
 }
 
 type AdminSettings struct {

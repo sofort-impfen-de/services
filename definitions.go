@@ -23,12 +23,14 @@ import (
 type Definitions struct {
 	CommandsDefinitions
 	DatabaseDefinitions
+	MeterDefinitions
 }
 
 func (d Definitions) Marshal() map[string]interface{} {
 	return map[string]interface{}{
 		"commands": d.CommandsDefinitions,
 		"database": d.DatabaseDefinitions,
+		"meters":   d.MeterDefinitions,
 	}
 }
 
@@ -48,6 +50,9 @@ func MergeDefinitions(a, b Definitions) Definitions {
 		}
 		for k, v := range obj.DatabaseDefinitions {
 			c.DatabaseDefinitions[k] = v
+		}
+		for k, v := range obj.MeterDefinitions {
+			c.MeterDefinitions[k] = v
 		}
 	}
 	return c

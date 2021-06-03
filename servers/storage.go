@@ -31,11 +31,11 @@ type Storage struct {
 	db       services.Database
 }
 
-func MakeStorage(settings *services.StorageSettings, db services.Database) (*Storage, error) {
+func MakeStorage(settings *services.Settings) (*Storage, error) {
 
 	Storage := &Storage{
-		db:       db,
-		settings: settings,
+		db:       settings.DatabaseObj,
+		settings: settings.Storage,
 	}
 
 	methods := map[string]*jsonrpc.Method{
@@ -59,7 +59,7 @@ func MakeStorage(settings *services.StorageSettings, db services.Database) (*Sto
 		return nil, err
 	}
 
-	if jsonrpcServer, err := jsonrpc.MakeJSONRPCServer(settings.RPC, handler); err != nil {
+	if jsonrpcServer, err := jsonrpc.MakeJSONRPCServer(settings.Storage.RPC, handler); err != nil {
 		return nil, err
 	} else {
 		Storage.server = jsonrpcServer

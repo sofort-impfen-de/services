@@ -44,7 +44,7 @@ func Settings(definitions *services.Definitions) (*services.Settings, error) {
 	return helpers.Settings(settingsPaths, definitions)
 }
 
-func CLI(settings *services.Settings, db services.Database) {
+func CLI(settings *services.Settings) {
 
 	var err error
 
@@ -88,7 +88,7 @@ func CLI(settings *services.Settings, db services.Database) {
 
 	// we add commands from the definitions
 	for _, commandsDefinition := range settings.Definitions.CommandsDefinitions {
-		if commands, err := commandsDefinition.Maker(settings, db); err != nil {
+		if commands, err := commandsDefinition.Maker(settings); err != nil {
 			services.Log.Fatal(err)
 		} else {
 			bareCommands = append(bareCommands, commands...)

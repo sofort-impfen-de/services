@@ -38,11 +38,11 @@ type Appointments struct {
 	settings *services.AppointmentsSettings
 }
 
-func MakeAppointments(settings *services.AppointmentsSettings, db services.Database) (*Appointments, error) {
+func MakeAppointments(settings *services.Settings) (*Appointments, error) {
 
 	Appointments := &Appointments{
-		db:       db,
-		settings: settings,
+		db:       settings.DatabaseObj,
+		settings: settings.Appointments,
 	}
 
 	methods := map[string]*jsonrpc.Method{
@@ -118,7 +118,7 @@ func MakeAppointments(settings *services.AppointmentsSettings, db services.Datab
 		return nil, err
 	}
 
-	if jsonrpcServer, err := jsonrpc.MakeJSONRPCServer(settings.RPC, handler); err != nil {
+	if jsonrpcServer, err := jsonrpc.MakeJSONRPCServer(settings.Appointments.RPC, handler); err != nil {
 		return nil, err
 	} else {
 		Appointments.server = jsonrpcServer
@@ -1606,6 +1606,7 @@ type Capacity struct {
 // get n tokens from the given queue IDs
 func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueueTokensParams) *jsonrpc.Response {
 
+	// make sure this is a valid provider asking for tokens
 	resp, providerKey := c.isProvider(context, []byte(params.JSON), params.Signature, params.PublicKey)
 
 	if resp != nil {
@@ -1620,6 +1621,11 @@ func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueue
 		services.Log.Error(err)
 		return context.InternalError()
 	}
+
+	/*
+		- We want to store how many tokens providers have been querying and record data about queues
+		  and other properties (e.g. vaccine types)
+	*/
 
 	// to do: better balancing and check queue data
 	for _, capacity := range params.Data.Capacities {
