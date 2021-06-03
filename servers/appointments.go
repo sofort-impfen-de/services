@@ -146,7 +146,6 @@ func (c *Appointments) priorityToken() (uint64, []byte, error) {
 			intToken = binary.LittleEndian.Uint64(token)
 		}
 		intToken = intToken + 1
-		services.Log.Infof("%d", intToken)
 		bs := make([]byte, 8)
 		binary.LittleEndian.PutUint64(bs, intToken)
 
@@ -1035,7 +1034,6 @@ func (c *Appointments) getData(context *jsonrpc.Context, params *GetDataParams) 
 		services.Log.Error(err)
 		return context.InternalError()
 	} else {
-		services.Log.Info(i)
 		return context.Result(i)
 	}
 }
@@ -1207,15 +1205,12 @@ type Grant struct {
 // { dataList }, keyPair
 func (c *Appointments) bulkStoreData(context *jsonrpc.Context, params *BulkStoreDataParams) *jsonrpc.Response {
 	for _, sdd := range params.Data.DataList {
-		services.Log.Info(sdd.ID, "...")
 		if dv, err := json.Marshal(sdd.Data); err != nil {
 			services.Log.Error(err)
 			return context.InternalError()
 		} else if err := c.db.Value("data", sdd.ID).Set(dv, time.Hour*24*120); err != nil {
 			services.Log.Error(err)
 			return context.InternalError()
-		} else {
-			services.Log.Info(dv)
 		}
 	}
 	return context.Acknowledge()
@@ -1259,9 +1254,9 @@ var StoreDataForm = forms.Form{
 	},
 }
 
-type Anything struct{}
+type IsAnything struct{}
 
-func (a Anything) Validate(value interface{}, values map[string]interface{}) (interface{}, error) {
+func (a IsAnything) Validate(value interface{}, values map[string]interface{}) (interface{}, error) {
 	return value, nil
 }
 
@@ -1276,7 +1271,7 @@ var StoreDataDataForm = forms.Form{
 		{
 			Name: "data",
 			Validators: []forms.Validator{
-				Anything{},
+				IsAnything{},
 			},
 		},
 		{

@@ -17,6 +17,7 @@
 package servers
 
 import (
+	"encoding/json"
 	"github.com/kiebitz-oss/services"
 	"github.com/kiebitz-oss/services/databases"
 	"github.com/kiebitz-oss/services/jsonrpc"
@@ -77,25 +78,24 @@ var StoreSettingsForm = forms.Form{
 		{
 			Name: "data",
 			Validators: []forms.Validator{
-				forms.IsBytes{
-					Encoding:  "base64",
-					MinLength: 1,
-					MaxLength: 1024 * 8, // max 8kB
-				},
+				IsAnything{},
 			},
 		},
 	},
 }
 
 type StoreSettingsParams struct {
-	ID   []byte `json:"id"`
-	Data []byte `json:"data"`
+	ID   []byte      `json:"id"`
+	Data interface{} `json:"data"`
 }
 
 // store the settings in the database by ID
 func (c *Storage) storeSettings(context *jsonrpc.Context, params *StoreSettingsParams) *jsonrpc.Response {
 	value := c.db.Value("settings", params.ID)
-	if err := value.Set(params.Data, time.Duration(c.settings.SettingsTTLDays*24)*time.Hour); err != nil {
+	if dv, err := json.Marshal(params.Data); err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	} else if err := value.Set(dv, time.Duration(c.settings.SettingsTTLDays*24)*time.Hour); err != nil {
 		return context.InternalError()
 	}
 	return context.Acknowledge()
@@ -125,8 +125,11 @@ func (c *Storage) getSettings(context *jsonrpc.Context, params *GetSettingsParam
 			services.Log.Error(err)
 			return context.InternalError()
 		}
+	} else if i, err := toInterface(data); err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
 	} else {
-		return context.Result(Encode(data))
+		return context.Result(i)
 	}
 }
 
