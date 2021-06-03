@@ -30,9 +30,11 @@ type StorageSettings struct {
 }
 
 type AppointmentsSettings struct {
-	RPC    *JSONRPCServerSettings `json:"rpc"`
-	Keys   []*Key                 `json:"keys"`
-	Secret []byte                 `json:"secret"`
+	RPC                  *JSONRPCServerSettings `json:"rpc"`
+	Keys                 []*Key                 `json:"keys"`
+	Secret               []byte                 `json:"secret"`
+	ProviderCodesEnabled bool                   `json:"provider_codes_enabled"`
+	UserCodesEnabled     bool                   `json:"user_codes_enabled"`
 }
 
 func (a *AppointmentsSettings) Key(name string) *Key {

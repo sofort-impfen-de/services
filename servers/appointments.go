@@ -1462,6 +1462,17 @@ var GetTokenForm = forms.Form{
 			},
 		},
 		{
+			Name: "code",
+			Validators: []forms.Validator{
+				forms.IsOptional{},
+				forms.IsBytes{
+					Encoding:  "hex", // we encode this as hex since it gets passed in URLs
+					MinLength: 16,
+					MaxLength: 32,
+				},
+			},
+		},
+		{
 			Name: "queueData",
 			Validators: []forms.Validator{
 				forms.IsStringMap{}, // to do: better validation
@@ -1546,6 +1557,7 @@ type GetTokenParams struct {
 	Hash            []byte                      `json:"hash"`
 	EncryptedData   *services.ECDHEncryptedData `json:"encryptedData"`
 	QueueID         []byte                      `json:"queueID"`
+	Code            []byte                      `json:"code"`
 	QueueData       map[string]interface{}      `json:"queueData"`
 	SignedTokenData *SignedTokenData            `json:"signedTokenData"`
 }
@@ -1574,6 +1586,21 @@ type QueueToken struct {
 // get a token for a given queue
 // to do: handle updating tokens (necessary?)
 func (c *Appointments) getToken(context *jsonrpc.Context, params *GetTokenParams) *jsonrpc.Response {
+
+	codes := c.db.Set("codes", []byte("user"))
+
+	if c.settings.UserCodesEnabled {
+		if params.Code == nil {
+			return context.Error(400, "code missing", nil)
+		}
+		if ok, err := codes.Has(params.Code); err != nil {
+			services.Log.Error()
+			return context.InternalError()
+		} else if !ok {
+			return context.Error(401, "not authorized", nil)
+		}
+	}
+
 	if intToken, token, err := c.priorityToken(); err != nil {
 		services.Log.Error(err)
 		return context.InternalError()
@@ -1619,6 +1646,13 @@ func (c *Appointments) getToken(context *jsonrpc.Context, params *GetTokenParams
 				return context.InternalError()
 			}
 
+			// we delete the user code
+			if c.settings.UserCodesEnabled {
+				if err := codes.Del(params.Code); err != nil {
+					services.Log.Error(err)
+					return context.InternalError()
+				}
+			}
 			return context.Result(signedData)
 		}
 	}
@@ -1907,8 +1941,10 @@ var StoreProviderDataDataForm = forms.Form{
 		{
 			Name: "code",
 			Validators: []forms.Validator{
-				forms.IsOptional{Default: ""},
-				forms.IsString{
+				forms.IsOptional{},
+				forms.IsBytes{
+					Encoding:  "hex", // we encode this as hex since it gets passed in URLs
+					MinLength: 16,
 					MaxLength: 32,
 				},
 			},
@@ -1934,13 +1970,26 @@ type StoreProviderDataParams struct {
 type StoreProviderDataData struct {
 	ID            []byte                      `json:"id"`
 	EncryptedData *services.ECDHEncryptedData `json:"encryptedData"`
-	Code          string                      `json:"code"`
+	Code          []byte                      `json:"code"`
 }
 
 // { id, encryptedData, code }, keyPair
 func (c *Appointments) storeProviderData(context *jsonrpc.Context, params *StoreProviderDataParams) *jsonrpc.Response {
 
 	providerData := c.db.Map("providerData", []byte("unverified"))
+
+	if c.settings.ProviderCodesEnabled {
+		if params.Data.Code == nil {
+			return context.Error(400, "code missing", nil)
+		}
+		codes := c.db.Set("codes", []byte("provider"))
+		if ok, err := codes.Has(params.Data.Code); err != nil {
+			services.Log.Error()
+			return context.InternalError()
+		} else if !ok {
+			return context.Error(401, "not authorized", nil)
+		}
+	}
 
 	if err := providerData.Set(params.Data.ID, []byte(params.JSON)); err != nil {
 		return context.InternalError()

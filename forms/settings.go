@@ -242,6 +242,20 @@ var AppointmentsForm = forms.Form{
 			},
 		},
 		{
+			Name: "provider_codes_enabled",
+			Validators: []forms.Validator{
+				forms.IsOptional{Default: true},
+				forms.IsBoolean{},
+			},
+		},
+		{
+			Name: "user_codes_enabled",
+			Validators: []forms.Validator{
+				forms.IsOptional{Default: true},
+				forms.IsBoolean{},
+			},
+		},
+		{
 			Name: "secret",
 			Validators: []forms.Validator{
 				forms.IsBytes{
