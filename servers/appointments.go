@@ -1731,6 +1731,7 @@ var tws = []services.TimeWindowFunc{
 	services.Hour,
 	services.Day,
 	services.Week,
+	services.Month,
 }
 
 // { capacities }, keyPair
