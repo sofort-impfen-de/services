@@ -1799,11 +1799,16 @@ func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueue
 		now := time.Now().UTC().UnixNano()
 
 		addTokenStats := func(tw services.TimeWindow, data map[string]string) error {
-			if err := c.meter.AddMax("queues", "tokens", uid, data, tw, totalTokens); err != nil {
+			// we add the number of tokens that were returned
+			if err := c.meter.Add("queues", "tokens", uid, data, tw, totalTokens); err != nil {
 				return err
 			}
-
+			// we add the maximum of capacity that a given provider had
 			if err := c.meter.AddMax("queues", "capacities", uid, data, tw, totalCapacity); err != nil {
+				return err
+			}
+			// we add the maximum of the difference between capacity and available tokens
+			if err := c.meter.AddMax("queues", "oversupply", uid, data, tw, totalCapacity-totalTokens); err != nil {
 				return err
 			}
 			return nil
