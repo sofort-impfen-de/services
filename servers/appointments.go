@@ -1801,7 +1801,7 @@ func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueue
 
 		addTokenStats := func(tw services.TimeWindow, data map[string]string) error {
 			// we add the number of tokens that were returned
-			if err := c.meter.Add("queues", "tokens", uid, data, tw, totalTokens); err != nil {
+			if err := c.meter.Add("queues", "tokens", data, tw, totalTokens); err != nil {
 				return err
 			}
 			// we add the maximum of capacity that a given provider had
