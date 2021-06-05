@@ -34,7 +34,6 @@ admin:
 appointments:
   user_codes_enabled: false
   provider_codes_enabled: false
-  secret: 71Bh6CloULt/iOFVB9MDQUsEyOc4lcTGRtv+E6eaKVY=
   keys: []
   rpc:
     bind_address: localhost:8888

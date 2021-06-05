@@ -433,7 +433,7 @@ func (r *Redis) GetByTimeIds(id string, from, to int64, tId, maxTId int64, name,
 			if err != nil {
 				continue
 			}
-			if metric.TimeWindow.To < from || metric.TimeWindow.From > to {
+			if metric.TimeWindow.To <= from || metric.TimeWindow.From >= to {
 				continue
 			}
 			if name != "" && metric.Name != name {
