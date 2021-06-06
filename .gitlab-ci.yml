@@ -2,13 +2,14 @@ image: golang:1.16
 
 stages:
   - test
+  - build
+  - deploy
 
 variables:
   GIT_SUBMODULE_STRATEGY: recursive # required for submodules
   DEBIAN_FRONTEND: noninteractive
 
-
-cache: 
+cache:
     key: ${CI_COMMIT_REF_SLUG}
     paths:
       - docs/node_modules/
@@ -19,3 +20,37 @@ run-tests:
   stage: test
   script:
     - make test
+
+build-backend-production:
+  stage: build
+  #only:
+  #  - tags
+  image: docker:19.03.0
+  services:
+    - docker:19.03.0-dind
+  variables:
+    DOCKER_DRIVER: "overlay2"
+    DOCKER_TLS_CERTDIR: ""
+    REGISTRY: "registry.sofort-impfen.de"
+    IMAGE_SPACE: "registry.sofort-impfen.de/si/services"
+  before_script:
+    - echo $LOGIN_PASSPHRASE | docker login --username gitlab+deploy-token-5 --password-stdin $REGISTRY
+  script:
+    # if the commit tag does not match a semantic version number we bail out
+    - if [ -n "$CI_COMMIT_TAG" ] && [[ ! "$CI_COMMIT_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then exit 1; fi;
+    - docker build -t "${IMAGE_SPACE}/services:${CI_COMMIT_SHORT_SHA}" -t "${IMAGE_SPACE}/services:latest" -t "${IMAGE_SPACE}/services:latest" .
+    - docker push "${IMAGE_SPACE}/services:${CI_COMMIT_SHORT_SHA}"
+    - docker push "${IMAGE_SPACE}/services:latest"
+    # If this is a tagged release, we tag the image with it.
+    - if [ -n "$CI_COMMIT_TAG" ]; then docker tag "${IMAGE_SPACE}/services:${CI_COMMIT_SHORT_SHA} ${IMAGE_SPACE}/services:${CI_COMMIT_TAG}"; fi;
+    - if [ -n "$CI_COMMIT_TAG" ]; then docker push ${IMAGE_SPACE}/services:${CI_COMMIT_TAG}; fi;
+
+deploy-backend-production:
+  image: alpine:latest
+  stage: deploy
+  before_script:
+    - apk add curl
+  script:
+    - curl -X POST "https://rundeck.sofort-impfen.de/api/19/job/41ae0e39-2b00-42d2-808b-7797e4d5c692/run?authtoken=${RUNDECK_TOKEN}" --header "Content-Type:text/xml"
+  variables:
+    GIT_STRATEGY: none
