@@ -1563,14 +1563,15 @@ func (c *Appointments) getToken(context *jsonrpc.Context, params *GetTokenParams
 	codes := c.db.Set("codes", []byte("user"))
 
 	if c.settings.UserCodesEnabled {
+		notAuthorized := context.Error(401, "not authorized", nil)
 		if params.Code == nil {
-			return context.Error(400, "code missing", nil)
+			return notAuthorized
 		}
 		if ok, err := codes.Has(params.Code); err != nil {
 			services.Log.Error()
 			return context.InternalError()
 		} else if !ok {
-			return context.Error(401, "not authorized", nil)
+			return notAuthorized
 		}
 	}
 
@@ -1926,15 +1927,16 @@ func (c *Appointments) storeProviderData(context *jsonrpc.Context, params *Store
 	providerData := c.db.Map("providerData", []byte("unverified"))
 
 	if c.settings.ProviderCodesEnabled {
+		notAuthorized := context.Error(401, "not authorized", nil)
 		if params.Data.Code == nil {
-			return context.Error(400, "code missing", nil)
+			return notAuthorized
 		}
 		codes := c.db.Set("codes", []byte("provider"))
 		if ok, err := codes.Has(params.Data.Code); err != nil {
 			services.Log.Error()
 			return context.InternalError()
 		} else if !ok {
-			return context.Error(401, "not authorized", nil)
+			return notAuthorized
 		}
 	}
 
