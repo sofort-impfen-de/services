@@ -110,8 +110,8 @@ func MakeRedis(settings interface{}) (services.Database, error) {
 }
 
 func (d *Redis) Client() redis.Cmdable {
-	if d.pipeline != nil {
-		return d.pipeline
+	if d.transaction != nil {
+		return d.transaction
 	}
 	return d.client
 }
@@ -147,10 +147,14 @@ func (d *Redis) Begin() (services.Transaction, error) {
 		channel: make(chan bool),
 	}
 
+	started := make(chan bool)
+
 	tx := func(tx *redis.Tx) error {
 		nd.mutex.Lock()
 		nd.transaction = tx
 		nd.mutex.Unlock()
+
+		started <- true
 
 		_, err := tx.Pipelined(func(pipeline redis.Pipeliner) error {
 
@@ -183,10 +187,19 @@ func (d *Redis) Begin() (services.Transaction, error) {
 		}
 	}()
 
+	select {
+	case <-started:
+	case <-time.After(1 * time.Second):
+		return nil, fmt.Errorf("timeout")
+	}
+
 	return nd, nil
 }
 
 func (d *Redis) Commit() error {
+
+	services.Log.Debug("Committing...")
+
 	if d.transaction == nil {
 		return fmt.Errorf("not in a transaction")
 	}
@@ -205,6 +218,8 @@ func (d *Redis) Commit() error {
 }
 
 func (d *Redis) Rollback() error {
+
+	services.Log.Debug("Rolling back...")
 
 	if d.transaction == nil {
 		return fmt.Errorf("not in a transaction")

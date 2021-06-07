@@ -370,12 +370,22 @@ type KeyData struct {
 // { id, key, providerData, keyData }, keyPair
 func (c *Appointments) confirmProvider(context *jsonrpc.Context, params *ConfirmProviderParams) *jsonrpc.Response {
 
+	success := false
+	transaction, finalize, err := c.transaction(&success)
+
+	if err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+
+	defer finalize()
+
 	if resp, _ := c.isMediator(context, []byte(params.JSON), params.Signature, params.PublicKey); resp != nil {
 		return resp
 	}
 
 	hash := crypto.Hash(params.Data.SignedKeyData.Data.Signing)
-	keys := c.db.Map("keys", []byte("providers"))
+	keys := transaction.Map("keys", []byte("providers"))
 
 	bd, err := json.Marshal(
 		&ActorKey{
@@ -396,11 +406,10 @@ func (c *Appointments) confirmProvider(context *jsonrpc.Context, params *Confirm
 		services.Log.Error(err)
 		return context.InternalError()
 	} else if !bytes.Equal(result, bd) {
-		services.Log.Error("does not match")
 		return context.InternalError()
 	}
 
-	data := c.db.Value("data", params.Data.ID)
+	data := transaction.Value("data", params.Data.ID)
 
 	pd, err := json.Marshal(params.Data.EncryptedProviderData)
 	if err != nil {
@@ -408,10 +417,26 @@ func (c *Appointments) confirmProvider(context *jsonrpc.Context, params *Confirm
 		return context.InternalError()
 	}
 
-	if err := data.Set(pd, time.Hour*24*365); err != nil {
+	ttl := time.Hour * 24 * 365
+
+	if err := data.Set(pd, ttl); err != nil {
 		services.Log.Error(err)
 		return context.InternalError()
 	}
+
+	permissions := []*Permission{
+		&Permission{
+			Rights: []string{"read"},
+			Keys:   [][]byte{params.Data.SignedKeyData.Data.Signing},
+		},
+	}
+
+	// we give the provider the right to read this data
+	if result := c.setPermissions(context, transaction, params.Data.ID, permissions, ttl); result != nil {
+		return result
+	}
+
+	success = true
 
 	return context.Acknowledge()
 }
@@ -1115,7 +1140,31 @@ type GetDataData struct {
 
 // { id }, keyPair
 func (c *Appointments) getData(context *jsonrpc.Context, params *GetDataParams) *jsonrpc.Response {
-	if data, err := c.db.Value("data", params.Data.ID).Get(); err != nil {
+
+	success := false
+	transaction, finalize, err := c.transaction(&success)
+
+	if err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+
+	defer finalize()
+
+	// we verify the signature (without veryfing e.g. the provenance of the key)
+	if ok, err := crypto.VerifyWithBytes([]byte(params.JSON), params.Signature, params.PublicKey); err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	} else if !ok {
+		return context.Error(400, "invalid signature", nil)
+	}
+
+	// we make sure the user has the permission to read this data
+	if result := c.verifyPermissions(context, transaction, params.Data.ID, []string{"read"}, params.PublicKey); result != nil {
+		return result
+	}
+
+	if data, err := transaction.Value("data", params.Data.ID).Get(); err != nil {
 		if err == databases.NotFound {
 			return context.NotFound()
 		}
@@ -1125,6 +1174,7 @@ func (c *Appointments) getData(context *jsonrpc.Context, params *GetDataParams) 
 		services.Log.Error(err)
 		return context.InternalError()
 	} else {
+		success = true
 		return context.Result(i)
 	}
 }
@@ -1288,9 +1338,23 @@ type StoreDataData struct {
 }
 
 type Permission struct {
+	Rights []string `json:"rights"`
+	Keys   [][]byte `json:"keys"`
+}
+
+type GrantData struct {
+	ObjectID    []byte        `json:"objectID"`
+	GrantID     []byte        `json:"grantID"`
+	SingleUse   bool          `json:"singleUse"`
+	ExpiresAt   time.Time     `json:"expiresAt"`
+	Permissions []*Permission `json:"permissions"`
 }
 
 type Grant struct {
+	JSON      string     `json:"json"`
+	Data      *GrantData `json:"data"`
+	Signature []byte     `json:"signature"`
+	PublicKey []byte     `json:"publicKey"`
 }
 
 // { dataList }, keyPair
@@ -1391,11 +1455,110 @@ var StoreDataDataForm = forms.Form{
 }
 
 var PermissionForm = forms.Form{
-	Fields: []forms.Field{},
+	Fields: []forms.Field{
+		{
+			Name: "rights",
+			Validators: []forms.Validator{
+				forms.IsList{
+					Validators: []forms.Validator{
+						forms.IsIn{Choices: []interface{}{"read", "write", "delete"}},
+					},
+				},
+			},
+		},
+		{
+			Name: "keys",
+			Validators: []forms.Validator{
+				forms.IsList{
+					Validators: []forms.Validator{
+						forms.IsBytes{Encoding: "base64", MaxLength: 200, MinLength: 32},
+					},
+				},
+			},
+		},
+	},
 }
 
 var GrantForm = forms.Form{
-	Fields: []forms.Field{},
+	Fields: []forms.Field{
+		{
+			Name: "data",
+			Validators: []forms.Validator{
+				forms.IsString{},
+				JSON{
+					Key: "json",
+				},
+				forms.IsStringMap{
+					Form: &GrantDataForm,
+				},
+			},
+		},
+		{
+			Name: "signature",
+			Validators: []forms.Validator{
+				forms.IsBytes{
+					Encoding:  "base64",
+					MaxLength: 1000,
+					MinLength: 50,
+				},
+			},
+		},
+		{
+			Name: "publicKey",
+			Validators: []forms.Validator{
+				forms.IsOptional{},
+				forms.IsBytes{
+					Encoding:  "base64",
+					MaxLength: 1000,
+					MinLength: 50,
+				},
+			},
+		},
+	},
+}
+
+var GrantDataForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "objectID",
+			Validators: []forms.Validator{
+				ID,
+			},
+		},
+		{
+			Name: "grantID",
+			Validators: []forms.Validator{
+				ID,
+			},
+		},
+		{
+			Name: "singleUse",
+			Validators: []forms.Validator{
+				forms.IsOptional{Default: true},
+				forms.IsBoolean{},
+			},
+		},
+		{
+			Name: "expiresAt",
+			Validators: []forms.Validator{
+				forms.IsTime{
+					Format: "rfc3339",
+				},
+			},
+		},
+		{
+			Name: "permissions",
+			Validators: []forms.Validator{
+				forms.IsList{
+					Validators: []forms.Validator{
+						forms.IsStringMap{
+							Form: &PermissionForm,
+						},
+					},
+				},
+			},
+		},
+	},
 }
 
 type StoreDataParams struct {
@@ -1405,16 +1568,191 @@ type StoreDataParams struct {
 	PublicKey []byte         `json:"publicKey"`
 }
 
+type Permissions struct {
+	Permissions []*Permission
+}
+
+func (c *Appointments) verifyGrant(context *jsonrpc.Context, transaction services.Transaction, id []byte, rights []string, publicKey []byte, grant *Grant) *jsonrpc.Response {
+
+	notAuthorized := context.Error(401, "not authorized", nil)
+	permissionObj := transaction.Value("permissions", id)
+	value, err := permissionObj.Get()
+
+	if err != nil {
+		if err != databases.NotFound {
+			return context.InternalError()
+		} else {
+		}
+	} else if len(value) > 0 {
+		// grants can't be applied to objects that already have permissions...
+		return notAuthorized
+	}
+
+	// we check that this grant is still valid
+	resp, _ := c.isProvider(context, []byte(grant.JSON), grant.Signature, grant.PublicKey)
+	if resp != nil {
+		return resp
+	}
+	if !bytes.Equal(grant.Data.ObjectID, id) {
+		// not the right object ID
+		return notAuthorized
+	}
+	if time.Now().After(grant.Data.ExpiresAt) {
+		// grant is already expired
+		return notAuthorized
+	}
+	// we check if the grant can be used only once
+	if grant.Data.SingleUse {
+		grants := transaction.Set("grants", []byte("data"))
+
+		if ok, err := grants.Has(grant.Data.GrantID); err != nil {
+			services.Log.Error(err)
+			return context.InternalError()
+		} else if ok {
+			// this code has already been used
+			return notAuthorized
+		} else if err := grants.Add(grant.Data.GrantID); err != nil {
+			services.Log.Error(err)
+			return context.InternalError()
+		}
+	}
+	for _, permission := range grant.Data.Permissions {
+		for _, pk := range permission.Keys {
+			if bytes.Equal(pk, publicKey) {
+				for _, requiredRight := range rights {
+					found := false
+					for _, right := range permission.Rights {
+						if right == requiredRight {
+							found = true
+							break
+						}
+					}
+					// there's a right missing
+					if !found {
+						return notAuthorized
+					}
+				}
+				// this key matches and grants the necessary rights
+				return nil
+			}
+		}
+	}
+	// no permission matched
+	return notAuthorized
+}
+
+func (c *Appointments) verifyPermissions(context *jsonrpc.Context, transaction services.Transaction, id []byte, rights []string, publicKey []byte) *jsonrpc.Response {
+
+	notAuthorized := context.Error(401, "not authorized", nil)
+	permissionObj := transaction.Value("permissions", id)
+	value, err := permissionObj.Get()
+
+	if err != nil {
+		if err == databases.NotFound {
+			return notAuthorized
+		} else {
+			return context.InternalError()
+		}
+	}
+
+	if len(value) == 0 {
+		return notAuthorized
+	}
+
+	// there's an existing permissions object on this data
+	var permissions []*Permission
+	if err := json.Unmarshal(value, &permissions); err != nil {
+		services.Log.Errorf("JSON error: %v", err)
+		return context.InternalError()
+	}
+	for _, permission := range permissions {
+		for _, pk := range permission.Keys {
+			if bytes.Equal(pk, publicKey) {
+				for _, requiredRight := range rights {
+					found := false
+					for _, right := range permission.Rights {
+						if right == requiredRight {
+							found = true
+							break
+						}
+					}
+					// there's a right missing
+					if !found {
+						return notAuthorized
+					}
+				}
+				// this key matches and grants the necessary rights
+				return nil
+			}
+		}
+	}
+	// no permission matched
+	return notAuthorized
+}
+
+func (c *Appointments) setPermissions(context *jsonrpc.Context, transaction services.Transaction, id []byte, permissions []*Permission, ttl time.Duration) *jsonrpc.Response {
+
+	permissionObj := transaction.Value("permissions", id)
+
+	if permissionsBytes, err := json.Marshal(permissions); err != nil {
+		return context.InternalError()
+	} else if err := permissionObj.Set(permissionsBytes, ttl); err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	} else if result, err := permissionObj.Get(); err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	} else if !bytes.Equal(result, permissionsBytes) {
+		return context.InternalError()
+	}
+
+	return nil
+}
+
 // { id, data, permissions, grant }, keyPair
 // store provider data for verification
 func (c *Appointments) storeData(context *jsonrpc.Context, params *StoreDataParams) *jsonrpc.Response {
+
+	success := false
+	transaction, finalize, err := c.transaction(&success)
+
+	if err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+
+	defer finalize()
+
+	ttl := time.Hour * 24 * 120
+
+	// we verify the signature (without veryfing e.g. the provenance of the key)
+	if ok, err := crypto.VerifyWithBytes([]byte(params.JSON), params.Signature, params.PublicKey); err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	} else if !ok {
+		return context.Error(400, "invalid signature", nil)
+	}
+
+	// we check if there's a grant included with the request
+	if params.Data.Grant != nil {
+		// we check if the grant is still valid
+		if result := c.verifyGrant(context, transaction, params.Data.ID, []string{"write"}, params.PublicKey, params.Data.Grant); result != nil {
+			return result
+		} else if result := c.setPermissions(context, transaction, params.Data.ID, params.Data.Grant.Data.Permissions, ttl); result != nil {
+			return result
+		}
+	} else if result := c.verifyPermissions(context, transaction, params.Data.ID, []string{"write"}, params.PublicKey); result != nil {
+		return result
+	}
+
 	if dv, err := json.Marshal(params.Data.Data); err != nil {
 		services.Log.Error(err)
 		return context.InternalError()
-	} else if err := c.db.Value("data", params.Data.ID).Set(dv, time.Hour*24*120); err != nil {
+	} else if err := transaction.Value("data", params.Data.ID).Set(dv, ttl); err != nil {
 		services.Log.Error(err)
 		return context.InternalError()
 	} else {
+		success = true
 		return context.Acknowledge()
 	}
 }
@@ -1933,20 +2271,15 @@ type StoreProviderDataData struct {
 	Code          []byte                      `json:"code"`
 }
 
-// { id, encryptedData, code }, keyPair
-func (c *Appointments) storeProviderData(context *jsonrpc.Context, params *StoreProviderDataParams) *jsonrpc.Response {
-
+func (c *Appointments) transaction(success *bool) (services.Transaction, func(), error) {
 	transaction, err := c.db.Begin()
 
 	if err != nil {
-		services.Log.Error(err)
-		return context.InternalError()
+		return nil, nil, err
 	}
 
-	success := false
-
 	finalize := func() {
-		if success {
+		if *success {
 			if err := transaction.Commit(); err != nil {
 				services.Log.Error(err)
 			}
@@ -1957,20 +2290,59 @@ func (c *Appointments) storeProviderData(context *jsonrpc.Context, params *Store
 		}
 	}
 
+	return transaction, finalize, nil
+
+}
+
+// { id, encryptedData, code }, keyPair
+func (c *Appointments) storeProviderData(context *jsonrpc.Context, params *StoreProviderDataParams) *jsonrpc.Response {
+
+	success := false
+	transaction, finalize, err := c.transaction(&success)
+
+	if err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+
 	defer finalize()
 
 	providerData := transaction.Map("providerData", []byte("unverified"))
+	codes := transaction.Set("codes", []byte("provider"))
 
-	if c.settings.ProviderCodesEnabled {
+	existingData := false
+	if result, err := providerData.Get(params.Data.ID); err != nil {
+		if err != databases.NotFound {
+			services.Log.Error(err)
+			return context.InternalError()
+		}
+	} else if result != nil {
+		existingData = true
+	}
+
+	providerID := append([]byte("providerData::"), params.Data.ID...)
+
+	// we verify the signature (without veryfing e.g. the provenance of the key)
+	if ok, err := crypto.VerifyWithBytes([]byte(params.JSON), params.Signature, params.PublicKey); err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	} else if !ok {
+		return context.Error(400, "invalid signature", nil)
+	}
+
+	if existingData {
+		if result := c.verifyPermissions(context, transaction, providerID, []string{"write"}, params.PublicKey); result != nil {
+			return result
+		}
+	} else if c.settings.ProviderCodesEnabled {
 		notAuthorized := context.Error(401, "not authorized", nil)
-		if params.Data.Code == nil {
+		if params.Data.Code == nil && !existingData {
 			return notAuthorized
 		}
-		codes := transaction.Set("codes", []byte("provider"))
 		if ok, err := codes.Has(params.Data.Code); err != nil {
 			services.Log.Error()
 			return context.InternalError()
-		} else if !ok {
+		} else if !ok && !existingData {
 			return notAuthorized
 		}
 	}
@@ -1978,6 +2350,26 @@ func (c *Appointments) storeProviderData(context *jsonrpc.Context, params *Store
 	if err := providerData.Set(params.Data.ID, []byte(params.JSON)); err != nil {
 		services.Log.Error(err)
 		return context.InternalError()
+	}
+
+	permissions := []*Permission{
+		&Permission{
+			Rights: []string{"write"},
+			Keys:   [][]byte{params.PublicKey},
+		},
+	}
+
+	// we give the provider the right to write this data again
+	if result := c.setPermissions(context, transaction, providerID, permissions, 0); result != nil {
+		return result
+	}
+
+	// we delete the provider code
+	if c.settings.ProviderCodesEnabled {
+		if err := codes.Del(params.Data.Code); err != nil {
+			services.Log.Error(err)
+			return context.InternalError()
+		}
 	}
 
 	success = true
