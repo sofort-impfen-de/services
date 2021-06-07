@@ -21,12 +21,17 @@ import (
 	"github.com/go-redis/redis"
 	"github.com/kiebitz-oss/services"
 	"github.com/kiprotect/go-helpers/forms"
+	"sync"
 	"time"
 )
 
 type Redis struct {
-	Client  redis.UniversalClient
-	Options redis.UniversalOptions
+	client      redis.UniversalClient
+	options     redis.UniversalOptions
+	transaction *redis.Tx
+	pipeline    redis.Pipeliner
+	mutex       sync.Mutex
+	channel     chan bool
 }
 
 type RedisSettings struct {
@@ -95,31 +100,126 @@ func MakeRedis(settings interface{}) (services.Database, error) {
 	}
 
 	database := &Redis{
-		Options: options,
-		Client:  client,
+		options: options,
+		client:  client,
+		channel: make(chan bool),
 	}
 
 	return database, nil
 
 }
 
+func (d *Redis) Client() redis.Cmdable {
+	if d.pipeline != nil {
+		return d.pipeline
+	}
+	return d.client
+}
+
 func (d *Redis) Open() error {
-	return d.Client.Close()
+	return nil
 }
 
 func (d *Redis) Close() error {
-	return nil
+	return d.client.Close()
 }
 
-func (d *Redis) Begin() error {
-	return nil
+func (d *Redis) Watch(keys ...string) error {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+
+	if d.transaction == nil {
+		return fmt.Errorf("cannot watch keys outside a transaction")
+	}
+
+	return d.transaction.Watch(keys...).Err()
+}
+
+func (d *Redis) Begin() (services.Transaction, error) {
+
+	if d.transaction != nil {
+		return nil, fmt.Errorf("already in a transaction")
+	}
+
+	nd := &Redis{
+		options: d.options,
+		client:  d.client,
+		channel: make(chan bool),
+	}
+
+	tx := func(tx *redis.Tx) error {
+		nd.mutex.Lock()
+		nd.transaction = tx
+		nd.mutex.Unlock()
+
+		_, err := tx.Pipelined(func(pipeline redis.Pipeliner) error {
+
+			nd.mutex.Lock()
+			nd.pipeline = pipeline
+			nd.mutex.Unlock()
+
+			// we block until the transaction completes
+			commit := <-nd.channel
+
+			nd.mutex.Lock()
+			if !commit {
+				if err := nd.pipeline.Discard(); err != nil {
+					services.Log.Error(err)
+				}
+			}
+			nd.mutex.Unlock()
+
+			nd.channel <- commit
+
+			return nil
+		})
+		return err
+	}
+
+	go func() {
+		err := nd.client.Watch(tx)
+		if err != nil {
+			services.Log.Error(err)
+		}
+	}()
+
+	return nd, nil
 }
 
 func (d *Redis) Commit() error {
+	if d.transaction == nil {
+		return fmt.Errorf("not in a transaction")
+	}
+
+	// we wait for the transaction to finish
+	d.channel <- true
+	<-d.channel
+
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+
+	d.transaction = nil
+	d.pipeline = nil
+
 	return nil
 }
 
 func (d *Redis) Rollback() error {
+
+	if d.transaction == nil {
+		return fmt.Errorf("not in a transaction")
+	}
+
+	// we wait for the transaction to finish
+	d.channel <- false
+	<-d.channel
+
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+
+	d.transaction = nil
+	d.pipeline = nil
+
 	return nil
 }
 
@@ -164,11 +264,11 @@ type RedisMap struct {
 }
 
 func (r *RedisMap) Del(key []byte) error {
-	return r.db.Client.HDel(string(r.fullKey), string(key)).Err()
+	return r.db.Client().HDel(string(r.fullKey), string(key)).Err()
 }
 
 func (r *RedisMap) GetAll() (map[string][]byte, error) {
-	result, err := r.db.Client.HGetAll(string(r.fullKey)).Result()
+	result, err := r.db.Client().HGetAll(string(r.fullKey)).Result()
 	if err != nil {
 		if err == redis.Nil {
 			return nil, NotFound
@@ -183,7 +283,7 @@ func (r *RedisMap) GetAll() (map[string][]byte, error) {
 }
 
 func (r *RedisMap) Get(key []byte) ([]byte, error) {
-	result, err := r.db.Client.HGet(string(r.fullKey), string(key)).Result()
+	result, err := r.db.Client().HGet(string(r.fullKey), string(key)).Result()
 	if err != nil {
 		if err == redis.Nil {
 			return nil, NotFound
@@ -194,7 +294,7 @@ func (r *RedisMap) Get(key []byte) ([]byte, error) {
 }
 
 func (r *RedisMap) Set(key []byte, value []byte) error {
-	return r.db.Client.HSet(string(r.fullKey), string(key), string(value)).Err()
+	return r.db.Client().HSet(string(r.fullKey), string(key), string(value)).Err()
 }
 
 type RedisSet struct {
@@ -203,15 +303,15 @@ type RedisSet struct {
 }
 
 func (r *RedisSet) Add(data []byte) error {
-	return r.db.Client.SAdd(string(r.fullKey), string(data)).Err()
+	return r.db.Client().SAdd(string(r.fullKey), string(data)).Err()
 }
 
 func (r *RedisSet) Has(data []byte) (bool, error) {
-	return r.db.Client.SIsMember(string(r.fullKey), string(data)).Result()
+	return r.db.Client().SIsMember(string(r.fullKey), string(data)).Result()
 }
 
 func (r *RedisSet) Del(data []byte) error {
-	return r.db.Client.SRem(string(r.fullKey), string(data)).Err()
+	return r.db.Client().SRem(string(r.fullKey), string(data)).Err()
 }
 
 type RedisValue struct {
@@ -220,11 +320,11 @@ type RedisValue struct {
 }
 
 func (r *RedisValue) Set(data []byte, ttl time.Duration) error {
-	return r.db.Client.Set(string(r.fullKey), string(data), ttl).Err()
+	return r.db.Client().Set(string(r.fullKey), string(data), ttl).Err()
 }
 
 func (r *RedisValue) Get() ([]byte, error) {
-	result, err := r.db.Client.Get(string(r.fullKey)).Result()
+	result, err := r.db.Client().Get(string(r.fullKey)).Result()
 	if err != nil {
 		if err == redis.Nil {
 			return nil, NotFound
@@ -235,7 +335,7 @@ func (r *RedisValue) Get() ([]byte, error) {
 }
 
 func (r *RedisValue) Del() error {
-	return r.db.Client.Del(string(r.fullKey)).Err()
+	return r.db.Client().Del(string(r.fullKey)).Err()
 }
 
 type RedisSortedSet struct {
@@ -244,11 +344,11 @@ type RedisSortedSet struct {
 }
 
 func (r *RedisSortedSet) Add(data []byte, score int64) error {
-	return r.db.Client.ZAdd(string(r.fullKey), redis.Z{Score: float64(score), Member: string(data)}).Err()
+	return r.db.Client().ZAdd(string(r.fullKey), redis.Z{Score: float64(score), Member: string(data)}).Err()
 }
 
 func (r *RedisSortedSet) PopMin(n int64) ([]*services.SortedSetEntry, error) {
-	result, err := r.db.Client.ZPopMin(string(r.fullKey), n).Result()
+	result, err := r.db.Client().ZPopMin(string(r.fullKey), n).Result()
 	if err != nil {
 		return nil, err
 	}
