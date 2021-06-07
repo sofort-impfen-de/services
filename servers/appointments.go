@@ -76,6 +76,10 @@ func MakeAppointments(settings *services.Settings) (*Appointments, error) {
 			Form:    &AddCodesForm,
 			Handler: Appointments.addCodes,
 		},
+		"uploadDistances": {
+			Form:    &UploadDistancesForm,
+			Handler: Appointments.uploadDistances,
+		},
 		"getStats": {
 			Form:    &GetStatsForm,
 			Handler: Appointments.getStats,
@@ -319,11 +323,10 @@ var KeyDataForm = forms.Form{
 			},
 		},
 		{
-			Name: "zipCode",
+			Name: "queueData",
 			Validators: []forms.Validator{
-				forms.IsString{
-					MaxLength: 5,
-					MinLength: 5,
+				forms.IsStringMap{
+					Form: &ProviderQueueDataForm,
 				},
 			},
 		},
@@ -335,6 +338,27 @@ var KeyDataForm = forms.Form{
 						ID,
 					},
 				},
+			},
+		},
+	},
+}
+
+var ProviderQueueDataForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "zipCode",
+			Validators: []forms.Validator{
+				forms.IsString{
+					MaxLength: 5,
+					MinLength: 5,
+				},
+			},
+		},
+		{
+			Name: "accessible",
+			Validators: []forms.Validator{
+				forms.IsOptional{Default: false},
+				forms.IsBoolean{},
 			},
 		},
 	},
@@ -361,10 +385,15 @@ type SignedKeyData struct {
 }
 
 type KeyData struct {
-	Signing    []byte   `json:"signing"`
-	Encryption []byte   `json:"encryption"`
-	ZipCode    string   `json:"zipCode"`
-	Queues     [][]byte `json:"queues"`
+	Signing    []byte             `json:"signing"`
+	Encryption []byte             `json:"encryption"`
+	Queues     [][]byte           `json:"queues"`
+	QueueData  *ProviderQueueData `json:"queueData"`
+}
+
+type ProviderQueueData struct {
+	ZipCode    string `json:"zipCode"`
+	Accessible bool   `json:"accessible"`
 }
 
 // { id, key, providerData, keyData }, keyPair
@@ -677,6 +706,143 @@ func (c *Appointments) addCodes(context *jsonrpc.Context, params *AddCodesParams
 	return context.Acknowledge()
 }
 
+var UploadDistancesForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "data",
+			Validators: []forms.Validator{
+				forms.IsString{},
+				JSON{
+					Key: "json",
+				},
+				forms.IsStringMap{
+					Form: &DistancesDataForm,
+				},
+			},
+		},
+		{
+			Name: "signature",
+			Validators: []forms.Validator{
+				forms.IsBytes{
+					Encoding:  "base64",
+					MaxLength: 1000,
+					MinLength: 50,
+				},
+			},
+		},
+		{
+			Name: "publicKey",
+			Validators: []forms.Validator{
+				forms.IsOptional{},
+				forms.IsBytes{
+					Encoding:  "base64",
+					MaxLength: 1000,
+					MinLength: 50,
+				},
+			},
+		},
+	},
+}
+
+var DistancesDataForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "timestamp",
+			Validators: []forms.Validator{
+				forms.IsTime{
+					Format: "rfc3339",
+				},
+			},
+		},
+		{
+			Name: "type",
+			Validators: []forms.Validator{
+				forms.IsIn{Choices: []interface{}{"zipCode"}},
+			},
+		},
+		{
+			Name: "distances",
+			Validators: []forms.Validator{
+				forms.IsList{
+					Validators: []forms.Validator{
+						forms.IsStringMap{
+							Form: &DistanceForm,
+						},
+					},
+				},
+			},
+		},
+	},
+}
+
+var DistanceForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "from",
+			Validators: []forms.Validator{
+				forms.IsString{},
+			},
+		},
+		{
+			Name: "to",
+			Validators: []forms.Validator{
+				forms.IsString{},
+			},
+		},
+		{
+			Name: "distance",
+			Validators: []forms.Validator{
+				forms.IsFloat{
+					HasMin: true,
+					Min:    0.0,
+					HasMax: true,
+					Max:    200.0,
+				},
+			},
+		},
+	},
+}
+
+type UploadDistancesParams struct {
+	JSON      string         `json:"json"`
+	Data      *DistancesData `json:"data"`
+	Signature []byte         `json:"signature"`
+	PublicKey []byte         `json:"publicKey"`
+}
+
+type DistancesData struct {
+	Timestamp *time.Time `json:"timestamp"`
+	Type      string     `json:"type"`
+	Distances []Distance `json:"distances"`
+}
+
+type Distance struct {
+	From     string  `json:"from"`
+	To       string  `json:"to"`
+	Distance float64 `json:"distance"`
+}
+
+func (c *Appointments) uploadDistances(context *jsonrpc.Context, params *UploadDistancesParams) *jsonrpc.Response {
+	rootKey := c.settings.Key("root")
+	if rootKey == nil {
+		services.Log.Error("root key missing")
+		return context.InternalError()
+	}
+	if ok, err := rootKey.Verify(&services.SignedData{
+		Data:      []byte(params.JSON),
+		Signature: params.Signature,
+	}); !ok {
+		return context.Error(403, "invalid signature", nil)
+	} else if err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+	if expired(params.Data.Timestamp) {
+		return context.Error(410, "signature expired", nil)
+	}
+	return context.Acknowledge()
+}
+
 var SetQueuesForm = forms.Form{
 	Fields: []forms.Field{
 		{
@@ -919,6 +1085,9 @@ func (a *ActorKey) ProviderKeyData() (*ProviderKeyData, error) {
 	if err := json.Unmarshal([]byte(a.Data), &pkd); err != nil {
 		return nil, err
 	}
+	if pkd.QueueData == nil {
+		pkd.QueueData = &ProviderQueueData{}
+	}
 	return pkd, nil
 }
 
@@ -929,11 +1098,11 @@ type ActorKeyData struct {
 }
 
 type ProviderKeyData struct {
-	Encryption []byte     `json:"encryption"`
-	Signing    []byte     `json:"signing"`
-	Queues     [][]byte   `json:"queues"`
-	ZipCode    string     `json:"zipCode"`
-	Timestamp  *time.Time `json:"timestamp,omitempty"`
+	Encryption []byte             `json:"encryption"`
+	Signing    []byte             `json:"signing"`
+	Queues     [][]byte           `json:"queues"`
+	QueueData  *ProviderQueueData `json:"queueData"`
+	Timestamp  *time.Time         `json:"timestamp,omitempty"`
 }
 
 func findActorKey(keys []*ActorKey, publicKey []byte) (*ActorKey, error) {
@@ -1787,7 +1956,9 @@ var GetTokenForm = forms.Form{
 		{
 			Name: "queueData",
 			Validators: []forms.Validator{
-				forms.IsStringMap{}, // to do: better validation
+				forms.IsStringMap{
+					Form: &TokenQueueDataForm,
+				},
 			},
 		},
 		{
@@ -1805,6 +1976,39 @@ var GetTokenForm = forms.Form{
 				forms.IsStringMap{
 					Form: &kbForms.ECDHEncryptedDataForm,
 				},
+			},
+		},
+	},
+}
+
+var TokenQueueDataForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "zipCode",
+			Validators: []forms.Validator{
+				forms.IsString{
+					MaxLength: 5,
+					MinLength: 5,
+				},
+			},
+		},
+		{
+			Name: "distance",
+			Validators: []forms.Validator{
+				forms.IsOptional{Default: 5},
+				forms.IsInteger{
+					HasMin: true,
+					HasMax: true,
+					Min:    5,
+					Max:    50,
+				},
+			},
+		},
+		{
+			Name: "accessible",
+			Validators: []forms.Validator{
+				forms.IsOptional{Default: false},
+				forms.IsBoolean{},
 			},
 		},
 	},
@@ -1870,7 +2074,7 @@ type GetTokenParams struct {
 	EncryptedData   *services.ECDHEncryptedData `json:"encryptedData"`
 	QueueID         []byte                      `json:"queueID"`
 	Code            []byte                      `json:"code"`
-	QueueData       map[string]interface{}      `json:"queueData"`
+	QueueData       *TokenQueueData             `json:"queueData"`
 	SignedTokenData *SignedTokenData            `json:"signedTokenData"`
 }
 
@@ -1890,8 +2094,14 @@ type QueueToken struct {
 	Token         []byte                      `json:"token"`
 	Queue         []byte                      `json:"queue"`
 	Position      int64                       `json:"position"`
-	QueueData     map[string]interface{}      `json:"queueData"`
+	QueueData     *TokenQueueData             `json:"queueData"`
 	EncryptedData *services.ECDHEncryptedData `json:"encryptedData"`
+}
+
+type TokenQueueData struct {
+	ZipCode    string `json:"zipCode"`
+	Accessible bool   `json:"accessible"`
+	Distance   int64  `json:"distance"`
 }
 
 //{hash, encryptedData, queueID, queueData, signedTokenData}
@@ -2112,7 +2322,30 @@ func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueue
 						if err := json.Unmarshal(entry.Data, &qt); err != nil {
 							continue
 						}
+						if qt.QueueData == nil {
+							qt.QueueData = &TokenQueueData{}
+						}
 						qt.Queue = queueID
+
+						match := true
+						// user isn't in the same zip code area
+						if qt.QueueData.ZipCode != pkd.QueueData.ZipCode {
+							match = false
+						}
+
+						// user needs an accessible provider but this isn't the case
+						if qt.QueueData.Accessible && !pkd.QueueData.Accessible {
+							match = false
+						}
+
+						if !match {
+							// we put the token back on the queue as it doesn't match...
+							if err := ssq.Add(entry.Data, qt.Position); err != nil {
+								services.Log.Error(err)
+							}
+							continue
+						}
+
 						// we add the token to the selected tokens for this queue
 						if err := sss.Add(entry.Data, entry.Score); err != nil {
 							services.Log.Error(err)
@@ -2178,7 +2411,7 @@ func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueue
 
 			// statistics by zip code
 			if err := addTokenStats(tw, map[string]string{
-				"zipCode": pkd.ZipCode,
+				"zipCode": pkd.QueueData.ZipCode,
 			}); err != nil {
 				services.Log.Error(err)
 			}
