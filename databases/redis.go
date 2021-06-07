@@ -362,6 +362,10 @@ func (r *RedisSortedSet) Add(data []byte, score int64) error {
 	return r.db.Client().ZAdd(string(r.fullKey), redis.Z{Score: float64(score), Member: string(data)}).Err()
 }
 
+func (r *RedisSortedSet) Del(data []byte) error {
+	return r.db.Client().ZRem(string(r.fullKey), string(data)).Err()
+}
+
 func (r *RedisSortedSet) PopMin(n int64) ([]*services.SortedSetEntry, error) {
 	result, err := r.db.Client().ZPopMin(string(r.fullKey), n).Result()
 	if err != nil {

@@ -75,6 +75,7 @@ type SortedSetEntry struct {
 
 type SortedSet interface {
 	Object
+	Del([]byte) error
 	Add([]byte, int64) error
 	PopMin(int64) ([]*SortedSetEntry, error)
 }
