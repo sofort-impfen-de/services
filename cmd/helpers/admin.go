@@ -128,24 +128,42 @@ func uploadDistances(settings *services.Settings) func(c *cli.Context) error {
 			services.Log.Fatal("can't find signing key")
 		}
 
-		bytes, err := json.Marshal(distances)
+		i := 0
+		allDistances := distances.Distances
 
-		if err != nil {
-			services.Log.Fatal(err)
-		}
+		N := 10000
 
-		signedData, err := signingKey.SignString(string(bytes))
+		// we chunk the distances up
+		for i < len(allDistances) {
 
-		if err != nil {
-			services.Log.Fatal(err)
-		}
+			j := i + N
+			if j >= len(allDistances) {
+				j = len(allDistances) - 1
+			}
 
-		request := jsonrpc.MakeRequest("uploadDistances", "", signedData.AsMap())
+			services.Log.Infof("Submitting distances [%d, %d] from %d in total...", i, j, len(allDistances))
 
-		if response, err := client.Call(request); err != nil {
-			services.Log.Fatal(err)
-		} else {
-			services.Log.Info(response.AsJSON())
+			distances.Distances = allDistances[i:j]
+
+			i += N
+
+			bytes, err := json.Marshal(distances)
+
+			if err != nil {
+				services.Log.Fatal(err)
+			}
+
+			signedData, err := signingKey.SignString(string(bytes))
+
+			if err != nil {
+				services.Log.Fatal(err)
+			}
+
+			request := jsonrpc.MakeRequest("uploadDistances", "", signedData.AsMap())
+
+			if _, err := client.Call(request); err != nil {
+				services.Log.Fatal(err)
+			}
 		}
 
 		return nil
