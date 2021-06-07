@@ -27,6 +27,131 @@ import (
 	"time"
 )
 
+var UploadDistancesForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "type",
+			Validators: []forms.Validator{
+				forms.IsIn{Choices: []interface{}{"zipCode"}},
+			},
+		},
+		{
+			Name: "distances",
+			Validators: []forms.Validator{
+				forms.IsList{
+					Validators: []forms.Validator{
+						forms.IsStringMap{
+							Form: &DistanceForm,
+						},
+					},
+				},
+			},
+		},
+	},
+}
+
+var DistanceForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "from",
+			Validators: []forms.Validator{
+				forms.IsString{},
+			},
+		},
+		{
+			Name: "to",
+			Validators: []forms.Validator{
+				forms.IsString{},
+			},
+		},
+		{
+			Name: "distance",
+			Validators: []forms.Validator{
+				forms.IsFloat{HasMin: true, Min: 0.0, HasMax: true, Max: 200.0},
+			},
+		},
+	},
+}
+
+type UploadDistances struct {
+	Type      string      `json:"type"`
+	Distances []*Distance `json:"distances"`
+	Timestamp *time.Time  `json:"timestamp"`
+}
+
+type Distance struct {
+	From     string  `json:"from"`
+	To       string  `json:"to"`
+	Distance float64 `json:"distance"`
+}
+
+func uploadDistances(settings *services.Settings) func(c *cli.Context) error {
+	return func(c *cli.Context) error {
+
+		if settings.Admin == nil {
+			services.Log.Fatal("admin settings missing")
+		}
+
+		filename := c.Args().Get(0)
+
+		if filename == "" {
+			services.Log.Fatal("please specify a filename")
+		}
+
+		jsonBytes, err := ioutil.ReadFile(filename)
+
+		if err != nil {
+			services.Log.Fatal(err)
+		}
+
+		t := time.Now()
+		distances := &UploadDistances{
+			Timestamp: &t,
+		}
+		var rawDistances map[string]interface{}
+
+		if err := json.Unmarshal(jsonBytes, &rawDistances); err != nil {
+			services.Log.Fatal(err)
+		}
+
+		if params, err := UploadDistancesForm.Validate(rawDistances); err != nil {
+			services.Log.Fatal(err)
+		} else if UploadDistancesForm.Coerce(distances, params); err != nil {
+			services.Log.Fatal(err)
+		}
+
+		client := jsonrpc.MakeClient(settings.Admin.Client.AppointmentsEndpoint)
+
+		signingKey := settings.Admin.Signing.Key("root")
+
+		if signingKey == nil {
+			services.Log.Fatal("can't find signing key")
+		}
+
+		bytes, err := json.Marshal(distances)
+
+		if err != nil {
+			services.Log.Fatal(err)
+		}
+
+		signedData, err := signingKey.SignString(string(bytes))
+
+		if err != nil {
+			services.Log.Fatal(err)
+		}
+
+		request := jsonrpc.MakeRequest("uploadDistances", "", signedData.AsMap())
+
+		if response, err := client.Call(request); err != nil {
+			services.Log.Fatal(err)
+		} else {
+			services.Log.Info(response.AsJSON())
+		}
+
+		return nil
+	}
+}
+
 var CodesForm = forms.Form{
 	Fields: []forms.Field{
 		{
@@ -418,6 +543,19 @@ func Admin(settings *services.Settings) ([]cli.Command, error) {
 							Flags:  []cli.Flag{},
 							Usage:  "upload codes from a file to the backend",
 							Action: uploadCodes(settings),
+						},
+					},
+				},
+				{
+					Name:  "distances",
+					Flags: []cli.Flag{},
+					Usage: "Distances-related command.",
+					Subcommands: []cli.Command{
+						{
+							Name:   "upload",
+							Flags:  []cli.Flag{},
+							Usage:  "upload distances from a file to the backend",
+							Action: uploadDistances(settings),
 						},
 					},
 				},

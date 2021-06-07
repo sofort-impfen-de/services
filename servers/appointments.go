@@ -76,6 +76,10 @@ func MakeAppointments(settings *services.Settings) (*Appointments, error) {
 			Form:    &AddCodesForm,
 			Handler: Appointments.addCodes,
 		},
+		"uploadDistances": {
+			Form:    &UploadDistancesForm,
+			Handler: Appointments.uploadDistances,
+		},
 		"getStats": {
 			Form:    &GetStatsForm,
 			Handler: Appointments.getStats,
@@ -123,6 +127,10 @@ func MakeAppointments(settings *services.Settings) (*Appointments, error) {
 		"getPendingProviderData": {
 			Form:    &GetPendingProviderDataForm,
 			Handler: Appointments.getPendingProviderData,
+		},
+		"getVerifiedProviderData": {
+			Form:    &GetVerifiedProviderDataForm,
+			Handler: Appointments.getVerifiedProviderData,
 		},
 	}
 
@@ -240,6 +248,12 @@ var ConfirmProviderDataForm = forms.Form{
 			},
 		},
 		{
+			Name: "verifiedID",
+			Validators: []forms.Validator{
+				ID,
+			},
+		},
+		{
 			Name: "encryptedProviderData",
 			Validators: []forms.Validator{
 				forms.IsStringMap{
@@ -319,11 +333,10 @@ var KeyDataForm = forms.Form{
 			},
 		},
 		{
-			Name: "zipCode",
+			Name: "queueData",
 			Validators: []forms.Validator{
-				forms.IsString{
-					MaxLength: 5,
-					MinLength: 5,
+				forms.IsStringMap{
+					Form: &ProviderQueueDataForm,
 				},
 			},
 		},
@@ -340,6 +353,27 @@ var KeyDataForm = forms.Form{
 	},
 }
 
+var ProviderQueueDataForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "zipCode",
+			Validators: []forms.Validator{
+				forms.IsString{
+					MaxLength: 5,
+					MinLength: 5,
+				},
+			},
+		},
+		{
+			Name: "accessible",
+			Validators: []forms.Validator{
+				forms.IsOptional{Default: false},
+				forms.IsBoolean{},
+			},
+		},
+	},
+}
+
 type ConfirmProviderParams struct {
 	JSON      string               `json:"json"`
 	Data      *ConfirmProviderData `json:"data"`
@@ -349,6 +383,7 @@ type ConfirmProviderParams struct {
 
 type ConfirmProviderData struct {
 	ID                    []byte                      `json:"id"`
+	VerifiedID            []byte                      `json:"verifiedID"`
 	EncryptedProviderData *services.ECDHEncryptedData `json:"encryptedProviderData"`
 	SignedKeyData         *SignedKeyData              `json:"signedKeyData"`
 }
@@ -361,21 +396,36 @@ type SignedKeyData struct {
 }
 
 type KeyData struct {
-	Signing    []byte   `json:"signing"`
-	Encryption []byte   `json:"encryption"`
-	ZipCode    string   `json:"zipCode"`
-	Queues     [][]byte `json:"queues"`
+	Signing    []byte             `json:"signing"`
+	Encryption []byte             `json:"encryption"`
+	Queues     [][]byte           `json:"queues"`
+	QueueData  *ProviderQueueData `json:"queueData"`
+}
+
+type ProviderQueueData struct {
+	ZipCode    string `json:"zipCode"`
+	Accessible bool   `json:"accessible"`
 }
 
 // { id, key, providerData, keyData }, keyPair
 func (c *Appointments) confirmProvider(context *jsonrpc.Context, params *ConfirmProviderParams) *jsonrpc.Response {
+
+	success := false
+	transaction, finalize, err := c.transaction(&success)
+
+	if err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+
+	defer finalize()
 
 	if resp, _ := c.isMediator(context, []byte(params.JSON), params.Signature, params.PublicKey); resp != nil {
 		return resp
 	}
 
 	hash := crypto.Hash(params.Data.SignedKeyData.Data.Signing)
-	keys := c.db.Map("keys", []byte("providers"))
+	keys := transaction.Map("keys", []byte("providers"))
 
 	bd, err := json.Marshal(
 		&ActorKey{
@@ -396,11 +446,10 @@ func (c *Appointments) confirmProvider(context *jsonrpc.Context, params *Confirm
 		services.Log.Error(err)
 		return context.InternalError()
 	} else if !bytes.Equal(result, bd) {
-		services.Log.Error("does not match")
 		return context.InternalError()
 	}
 
-	data := c.db.Value("data", params.Data.ID)
+	data := transaction.Value("data", params.Data.VerifiedID)
 
 	pd, err := json.Marshal(params.Data.EncryptedProviderData)
 	if err != nil {
@@ -408,10 +457,46 @@ func (c *Appointments) confirmProvider(context *jsonrpc.Context, params *Confirm
 		return context.InternalError()
 	}
 
-	if err := data.Set(pd, time.Hour*24*365); err != nil {
+	ttl := time.Hour * 24 * 365
+
+	if err := data.Set(pd, ttl); err != nil {
 		services.Log.Error(err)
 		return context.InternalError()
 	}
+
+	permissions := []*Permission{
+		&Permission{
+			Rights: []string{"read"},
+			Keys:   [][]byte{params.Data.SignedKeyData.Data.Signing},
+		},
+	}
+
+	// we give the provider the right to read this data
+	if result := c.setPermissions(context, transaction, params.Data.ID, permissions, ttl); result != nil {
+		return result
+	}
+
+	unverifiedProviderData := transaction.Map("providerData", []byte("unverified"))
+	verifiedProviderData := transaction.Map("providerData", []byte("verified"))
+
+	oldPd, err := unverifiedProviderData.Get(params.Data.ID)
+
+	if err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+
+	if err := unverifiedProviderData.Del(params.Data.ID); err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+
+	if err := verifiedProviderData.Set(params.Data.ID, oldPd); err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+
+	success = true
 
 	return context.Acknowledge()
 }
@@ -649,6 +734,186 @@ func (c *Appointments) addCodes(context *jsonrpc.Context, params *AddCodesParams
 			return context.InternalError()
 		}
 	}
+	return context.Acknowledge()
+}
+
+var UploadDistancesForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "data",
+			Validators: []forms.Validator{
+				forms.IsString{},
+				JSON{
+					Key: "json",
+				},
+				forms.IsStringMap{
+					Form: &DistancesDataForm,
+				},
+			},
+		},
+		{
+			Name: "signature",
+			Validators: []forms.Validator{
+				forms.IsBytes{
+					Encoding:  "base64",
+					MaxLength: 1000,
+					MinLength: 50,
+				},
+			},
+		},
+		{
+			Name: "publicKey",
+			Validators: []forms.Validator{
+				forms.IsOptional{},
+				forms.IsBytes{
+					Encoding:  "base64",
+					MaxLength: 1000,
+					MinLength: 50,
+				},
+			},
+		},
+	},
+}
+
+var DistancesDataForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "timestamp",
+			Validators: []forms.Validator{
+				forms.IsTime{
+					Format: "rfc3339",
+				},
+			},
+		},
+		{
+			Name: "type",
+			Validators: []forms.Validator{
+				forms.IsIn{Choices: []interface{}{"zipCode"}},
+			},
+		},
+		{
+			Name: "distances",
+			Validators: []forms.Validator{
+				forms.IsList{
+					Validators: []forms.Validator{
+						forms.IsStringMap{
+							Form: &DistanceForm,
+						},
+					},
+				},
+			},
+		},
+	},
+}
+
+var DistanceForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "from",
+			Validators: []forms.Validator{
+				forms.IsString{},
+			},
+		},
+		{
+			Name: "to",
+			Validators: []forms.Validator{
+				forms.IsString{},
+			},
+		},
+		{
+			Name: "distance",
+			Validators: []forms.Validator{
+				forms.IsFloat{
+					HasMin: true,
+					Min:    0.0,
+					HasMax: true,
+					Max:    200.0,
+				},
+			},
+		},
+	},
+}
+
+type UploadDistancesParams struct {
+	JSON      string         `json:"json"`
+	Data      *DistancesData `json:"data"`
+	Signature []byte         `json:"signature"`
+	PublicKey []byte         `json:"publicKey"`
+}
+
+type DistancesData struct {
+	Timestamp *time.Time `json:"timestamp"`
+	Type      string     `json:"type"`
+	Distances []Distance `json:"distances"`
+}
+
+type Distance struct {
+	From     string  `json:"from"`
+	To       string  `json:"to"`
+	Distance float64 `json:"distance"`
+}
+
+func (c *Appointments) getDistance(distanceType, from, to string) (float64, error) {
+
+	dst := c.db.Map("distances", []byte(distanceType))
+	keyA := fmt.Sprintf("%s:%s", from, to)
+	keyB := fmt.Sprintf("%s:%s", to, from)
+	value, err := dst.Get([]byte(keyA))
+
+	if err != nil && err != databases.NotFound {
+		return 0.0, err
+	}
+
+	if value == nil {
+		value, err = dst.Get([]byte(keyB))
+	}
+
+	if err != nil {
+		return 0.0, err
+	}
+
+	buf := bytes.NewReader(value)
+	var distance float64
+	if err := binary.Read(buf, binary.LittleEndian, &distance); err != nil {
+		return 0.0, err
+	}
+
+	return distance, nil
+
+}
+
+func (c *Appointments) uploadDistances(context *jsonrpc.Context, params *UploadDistancesParams) *jsonrpc.Response {
+	rootKey := c.settings.Key("root")
+	if rootKey == nil {
+		services.Log.Error("root key missing")
+		return context.InternalError()
+	}
+	if ok, err := rootKey.Verify(&services.SignedData{
+		Data:      []byte(params.JSON),
+		Signature: params.Signature,
+	}); !ok {
+		return context.Error(403, "invalid signature", nil)
+	} else if err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+	if expired(params.Data.Timestamp) {
+		return context.Error(410, "signature expired", nil)
+	}
+	dst := c.db.Map("distances", []byte(params.Data.Type))
+	for _, distance := range params.Data.Distances {
+		key := fmt.Sprintf("%s:%s", distance.From, distance.To)
+		buf := new(bytes.Buffer)
+		if err := binary.Write(buf, binary.LittleEndian, distance.Distance); err != nil {
+			services.Log.Error(err)
+			return context.InternalError()
+		}
+		if err := dst.Set([]byte(key), buf.Bytes()); err != nil {
+			services.Log.Error(err)
+			return context.InternalError()
+		}
+	}
+
 	return context.Acknowledge()
 }
 
@@ -894,6 +1159,9 @@ func (a *ActorKey) ProviderKeyData() (*ProviderKeyData, error) {
 	if err := json.Unmarshal([]byte(a.Data), &pkd); err != nil {
 		return nil, err
 	}
+	if pkd.QueueData == nil {
+		pkd.QueueData = &ProviderQueueData{}
+	}
 	return pkd, nil
 }
 
@@ -904,11 +1172,11 @@ type ActorKeyData struct {
 }
 
 type ProviderKeyData struct {
-	Encryption []byte     `json:"encryption"`
-	Signing    []byte     `json:"signing"`
-	Queues     [][]byte   `json:"queues"`
-	ZipCode    string     `json:"zipCode"`
-	Timestamp  *time.Time `json:"timestamp,omitempty"`
+	Encryption []byte             `json:"encryption"`
+	Signing    []byte             `json:"signing"`
+	Queues     [][]byte           `json:"queues"`
+	QueueData  *ProviderQueueData `json:"queueData"`
+	Timestamp  *time.Time         `json:"timestamp,omitempty"`
 }
 
 func findActorKey(keys []*ActorKey, publicKey []byte) (*ActorKey, error) {
@@ -1115,7 +1383,31 @@ type GetDataData struct {
 
 // { id }, keyPair
 func (c *Appointments) getData(context *jsonrpc.Context, params *GetDataParams) *jsonrpc.Response {
-	if data, err := c.db.Value("data", params.Data.ID).Get(); err != nil {
+
+	success := false
+	transaction, finalize, err := c.transaction(&success)
+
+	if err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+
+	defer finalize()
+
+	// we verify the signature (without veryfing e.g. the provenance of the key)
+	if ok, err := crypto.VerifyWithBytes([]byte(params.JSON), params.Signature, params.PublicKey); err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	} else if !ok {
+		return context.Error(400, "invalid signature", nil)
+	}
+
+	// we make sure the user has the permission to read this data
+	if result := c.verifyPermissions(context, transaction, params.Data.ID, []string{"read"}, params.PublicKey); result != nil {
+		return result
+	}
+
+	if data, err := transaction.Value("data", params.Data.ID).Get(); err != nil {
 		if err == databases.NotFound {
 			return context.NotFound()
 		}
@@ -1125,6 +1417,7 @@ func (c *Appointments) getData(context *jsonrpc.Context, params *GetDataParams) 
 		services.Log.Error(err)
 		return context.InternalError()
 	} else {
+		success = true
 		return context.Result(i)
 	}
 }
@@ -1196,8 +1489,34 @@ type BulkGetDataData struct {
 // { ids }, keyPair
 func (c *Appointments) bulkGetData(context *jsonrpc.Context, params *BulkGetDataParams) *jsonrpc.Response {
 	results := []interface{}{}
+
+	// we verify the signature (without veryfing e.g. the provenance of the key)
+	if ok, err := crypto.VerifyWithBytes([]byte(params.JSON), params.Signature, params.PublicKey); err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	} else if !ok {
+		return context.Error(400, "invalid signature", nil)
+	}
+
+	success := false
+	transaction, finalize, err := c.transaction(&success)
+
+	if err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+
+	defer finalize()
+
 	for _, id := range params.Data.IDs {
-		if data, err := c.db.Value("data", id).Get(); err != nil {
+
+		// we make sure the user has the permission to read this data
+		if result := c.verifyPermissions(context, transaction, id, []string{"read"}, params.PublicKey); result != nil {
+			results = append(results, nil)
+			continue
+		}
+
+		if data, err := transaction.Value("data", id).Get(); err != nil {
 			if err == databases.NotFound {
 				results = append(results, nil)
 				continue
@@ -1211,6 +1530,9 @@ func (c *Appointments) bulkGetData(context *jsonrpc.Context, params *BulkGetData
 			results = append(results, i)
 		}
 	}
+
+	success = true
+
 	return context.Result(results)
 }
 
@@ -1288,20 +1610,39 @@ type StoreDataData struct {
 }
 
 type Permission struct {
+	Rights []string `json:"rights"`
+	Keys   [][]byte `json:"keys"`
+}
+
+type GrantData struct {
+	ObjectID    []byte        `json:"objectID"`
+	GrantID     []byte        `json:"grantID"`
+	SingleUse   bool          `json:"singleUse"`
+	ExpiresAt   time.Time     `json:"expiresAt"`
+	Permissions []*Permission `json:"permissions"`
 }
 
 type Grant struct {
+	JSON      string     `json:"json"`
+	Data      *GrantData `json:"data"`
+	Signature []byte     `json:"signature"`
+	PublicKey []byte     `json:"publicKey"`
 }
 
 // { dataList }, keyPair
 func (c *Appointments) bulkStoreData(context *jsonrpc.Context, params *BulkStoreDataParams) *jsonrpc.Response {
+
+	// we verify the signature (without veryfing e.g. the provenance of the key)
+	if ok, err := crypto.VerifyWithBytes([]byte(params.JSON), params.Signature, params.PublicKey); err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	} else if !ok {
+		return context.Error(400, "invalid signature", nil)
+	}
+
 	for _, sdd := range params.Data.DataList {
-		if dv, err := json.Marshal(sdd.Data); err != nil {
-			services.Log.Error(err)
-			return context.InternalError()
-		} else if err := c.db.Value("data", sdd.ID).Set(dv, time.Hour*24*120); err != nil {
-			services.Log.Error(err)
-			return context.InternalError()
+		if result := c.storeDataHelper(context, params.JSON, params.PublicKey, params.Signature, sdd); result != nil {
+			return result
 		}
 	}
 	return context.Acknowledge()
@@ -1391,11 +1732,110 @@ var StoreDataDataForm = forms.Form{
 }
 
 var PermissionForm = forms.Form{
-	Fields: []forms.Field{},
+	Fields: []forms.Field{
+		{
+			Name: "rights",
+			Validators: []forms.Validator{
+				forms.IsList{
+					Validators: []forms.Validator{
+						forms.IsIn{Choices: []interface{}{"read", "write", "delete"}},
+					},
+				},
+			},
+		},
+		{
+			Name: "keys",
+			Validators: []forms.Validator{
+				forms.IsList{
+					Validators: []forms.Validator{
+						forms.IsBytes{Encoding: "base64", MaxLength: 200, MinLength: 32},
+					},
+				},
+			},
+		},
+	},
 }
 
 var GrantForm = forms.Form{
-	Fields: []forms.Field{},
+	Fields: []forms.Field{
+		{
+			Name: "data",
+			Validators: []forms.Validator{
+				forms.IsString{},
+				JSON{
+					Key: "json",
+				},
+				forms.IsStringMap{
+					Form: &GrantDataForm,
+				},
+			},
+		},
+		{
+			Name: "signature",
+			Validators: []forms.Validator{
+				forms.IsBytes{
+					Encoding:  "base64",
+					MaxLength: 1000,
+					MinLength: 50,
+				},
+			},
+		},
+		{
+			Name: "publicKey",
+			Validators: []forms.Validator{
+				forms.IsOptional{},
+				forms.IsBytes{
+					Encoding:  "base64",
+					MaxLength: 1000,
+					MinLength: 50,
+				},
+			},
+		},
+	},
+}
+
+var GrantDataForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "objectID",
+			Validators: []forms.Validator{
+				ID,
+			},
+		},
+		{
+			Name: "grantID",
+			Validators: []forms.Validator{
+				ID,
+			},
+		},
+		{
+			Name: "singleUse",
+			Validators: []forms.Validator{
+				forms.IsOptional{Default: true},
+				forms.IsBoolean{},
+			},
+		},
+		{
+			Name: "expiresAt",
+			Validators: []forms.Validator{
+				forms.IsTime{
+					Format: "rfc3339",
+				},
+			},
+		},
+		{
+			Name: "permissions",
+			Validators: []forms.Validator{
+				forms.IsList{
+					Validators: []forms.Validator{
+						forms.IsStringMap{
+							Form: &PermissionForm,
+						},
+					},
+				},
+			},
+		},
+	},
 }
 
 type StoreDataParams struct {
@@ -1405,18 +1845,217 @@ type StoreDataParams struct {
 	PublicKey []byte         `json:"publicKey"`
 }
 
-// { id, data, permissions, grant }, keyPair
-// store provider data for verification
-func (c *Appointments) storeData(context *jsonrpc.Context, params *StoreDataParams) *jsonrpc.Response {
-	if dv, err := json.Marshal(params.Data.Data); err != nil {
+type Permissions struct {
+	Permissions []*Permission
+}
+
+func (c *Appointments) verifyGrant(context *jsonrpc.Context, transaction services.Transaction, id []byte, rights []string, publicKey []byte, grant *Grant) *jsonrpc.Response {
+
+	notAuthorized := context.Error(401, "not authorized", nil)
+	permissionObj := transaction.Value("permissions", id)
+	value, err := permissionObj.Get()
+
+	if err != nil {
+		if err != databases.NotFound {
+			return context.InternalError()
+		}
+	} else if len(value) > 0 {
+		// grants can't be applied to objects that already have permissions...
+		return notAuthorized
+	}
+
+	// we check that this grant is still valid
+	resp, _ := c.isProvider(context, []byte(grant.JSON), grant.Signature, grant.PublicKey)
+	if resp != nil {
+		return resp
+	}
+
+	if !bytes.Equal(grant.Data.ObjectID, id) {
+		// not the right object ID
+		return notAuthorized
+	}
+	if time.Now().After(grant.Data.ExpiresAt) {
+		// grant is already expired
+		return notAuthorized
+	}
+	// we check if the grant can be used only once
+	if grant.Data.SingleUse {
+		grants := transaction.Set("grants", []byte("data"))
+
+		if ok, err := grants.Has(grant.Data.GrantID); err != nil {
+			services.Log.Error(err)
+			return context.InternalError()
+		} else if ok {
+			// this code has already been used
+			return notAuthorized
+		} else if err := grants.Add(grant.Data.GrantID); err != nil {
+			services.Log.Error(err)
+			return context.InternalError()
+		}
+	}
+	for _, permission := range grant.Data.Permissions {
+		for _, pk := range permission.Keys {
+			if bytes.Equal(pk, publicKey) {
+				for _, requiredRight := range rights {
+					found := false
+					for _, right := range permission.Rights {
+						if right == requiredRight {
+							found = true
+							break
+						}
+					}
+					// there's a right missing
+					if !found {
+						return notAuthorized
+					}
+				}
+				// this key matches and grants the necessary rights
+				return nil
+			}
+		}
+	}
+	// no permission matched
+	return notAuthorized
+}
+
+func (c *Appointments) verifyPermissions(context *jsonrpc.Context, transaction services.Transaction, id []byte, rights []string, publicKey []byte) *jsonrpc.Response {
+
+	notAuthorized := context.Error(401, "not authorized", nil)
+	permissionObj := transaction.Value("permissions", id)
+	value, err := permissionObj.Get()
+
+	if err != nil {
+		if err == databases.NotFound {
+			return notAuthorized
+		} else {
+			return context.InternalError()
+		}
+	}
+
+	if len(value) == 0 {
+		return notAuthorized
+	}
+
+	// there's an existing permissions object on this data
+	var permissions []*Permission
+	if err := json.Unmarshal(value, &permissions); err != nil {
+		services.Log.Errorf("JSON error: %v", err)
+		return context.InternalError()
+	}
+	for _, permission := range permissions {
+		for _, pk := range permission.Keys {
+			if bytes.Equal(pk, publicKey) {
+				for _, requiredRight := range rights {
+					found := false
+					for _, right := range permission.Rights {
+						if right == requiredRight {
+							found = true
+							break
+						}
+					}
+					// there's a right missing
+					if !found {
+						return notAuthorized
+					}
+				}
+				// this key matches and grants the necessary rights
+				return nil
+			}
+		}
+	}
+	// no permission matched
+	return notAuthorized
+}
+
+func (c *Appointments) setPermissions(context *jsonrpc.Context, transaction services.Transaction, id []byte, permissions []*Permission, ttl time.Duration) *jsonrpc.Response {
+
+	permissionObj := transaction.Value("permissions", id)
+
+	if permissionsBytes, err := json.Marshal(permissions); err != nil {
+		return context.InternalError()
+	} else if err := permissionObj.Set(permissionsBytes, ttl); err != nil {
 		services.Log.Error(err)
 		return context.InternalError()
-	} else if err := c.db.Value("data", params.Data.ID).Set(dv, time.Hour*24*120); err != nil {
+	} else if result, err := permissionObj.Get(); err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	} else if !bytes.Equal(result, permissionsBytes) {
+		return context.InternalError()
+	}
+
+	return nil
+}
+
+func (c *Appointments) storeDataHelper(context *jsonrpc.Context, jsonData string, publicKey, signature []byte, data *StoreDataData) *jsonrpc.Response {
+
+	success := false
+	transaction, finalize, err := c.transaction(&success)
+
+	if err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+
+	defer finalize()
+
+	ttl := time.Hour * 24 * 120
+	value := transaction.Value("data", data.ID)
+
+	isProvider := false
+
+	// we check if this is a valid provider
+	resp, _ := c.isProvider(context, []byte(jsonData), signature, publicKey)
+
+	if resp == nil {
+		isProvider = true
+	}
+
+	// only providers can directly write data to the backend
+	if !isProvider {
+		// we check if there's a grant included with the request
+		if data.Grant != nil {
+			// we check if the grant is still valid
+			if result := c.verifyGrant(context, transaction, data.ID, []string{"write"}, publicKey, data.Grant); result != nil {
+				return result
+			} else if result := c.setPermissions(context, transaction, data.ID, data.Grant.Data.Permissions, ttl); result != nil {
+				return result
+			}
+		} else if result := c.verifyPermissions(context, transaction, data.ID, []string{"write"}, publicKey); result != nil {
+			return result
+		}
+	} else if result := c.setPermissions(context, transaction, data.ID, data.Permissions, ttl); result != nil {
+		return result
+	}
+
+	if dv, err := json.Marshal(data.Data); err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	} else if err := value.Set(dv, ttl); err != nil {
 		services.Log.Error(err)
 		return context.InternalError()
 	} else {
-		return context.Acknowledge()
+
+		success = true
+		return nil
 	}
+}
+
+// { id, data, permissions, grant }, keyPair
+// store provider data for verification
+func (c *Appointments) storeData(context *jsonrpc.Context, params *StoreDataParams) *jsonrpc.Response {
+
+	// we verify the signature (without veryfing e.g. the provenance of the key)
+	if ok, err := crypto.VerifyWithBytes([]byte(params.JSON), params.Signature, params.PublicKey); err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	} else if !ok {
+		return context.Error(400, "invalid signature", nil)
+	}
+
+	if result := c.storeDataHelper(context, params.JSON, params.PublicKey, params.Signature, params.Data); result != nil {
+		return result
+	}
+	return context.Acknowledge()
 }
 
 // user endpoints
@@ -1449,7 +2088,9 @@ var GetTokenForm = forms.Form{
 		{
 			Name: "queueData",
 			Validators: []forms.Validator{
-				forms.IsStringMap{}, // to do: better validation
+				forms.IsStringMap{
+					Form: &TokenQueueDataForm,
+				},
 			},
 		},
 		{
@@ -1467,6 +2108,39 @@ var GetTokenForm = forms.Form{
 				forms.IsStringMap{
 					Form: &kbForms.ECDHEncryptedDataForm,
 				},
+			},
+		},
+	},
+}
+
+var TokenQueueDataForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "zipCode",
+			Validators: []forms.Validator{
+				forms.IsString{
+					MaxLength: 5,
+					MinLength: 5,
+				},
+			},
+		},
+		{
+			Name: "distance",
+			Validators: []forms.Validator{
+				forms.IsOptional{Default: 5},
+				forms.IsInteger{
+					HasMin: true,
+					HasMax: true,
+					Min:    5,
+					Max:    50,
+				},
+			},
+		},
+		{
+			Name: "accessible",
+			Validators: []forms.Validator{
+				forms.IsOptional{Default: false},
+				forms.IsBoolean{},
 			},
 		},
 	},
@@ -1532,7 +2206,7 @@ type GetTokenParams struct {
 	EncryptedData   *services.ECDHEncryptedData `json:"encryptedData"`
 	QueueID         []byte                      `json:"queueID"`
 	Code            []byte                      `json:"code"`
-	QueueData       map[string]interface{}      `json:"queueData"`
+	QueueData       *TokenQueueData             `json:"queueData"`
 	SignedTokenData *SignedTokenData            `json:"signedTokenData"`
 }
 
@@ -1552,8 +2226,14 @@ type QueueToken struct {
 	Token         []byte                      `json:"token"`
 	Queue         []byte                      `json:"queue"`
 	Position      int64                       `json:"position"`
-	QueueData     map[string]interface{}      `json:"queueData"`
+	QueueData     *TokenQueueData             `json:"queueData"`
 	EncryptedData *services.ECDHEncryptedData `json:"encryptedData"`
+}
+
+type TokenQueueData struct {
+	ZipCode    string `json:"zipCode"`
+	Accessible bool   `json:"accessible"`
+	Distance   int64  `json:"distance"`
 }
 
 //{hash, encryptedData, queueID, queueData, signedTokenData}
@@ -1561,76 +2241,177 @@ type QueueToken struct {
 // to do: handle updating tokens (necessary?)
 func (c *Appointments) getToken(context *jsonrpc.Context, params *GetTokenParams) *jsonrpc.Response {
 
-	codes := c.db.Set("codes", []byte("user"))
+	success := false
+	transaction, finalize, err := c.transaction(&success)
 
-	if c.settings.UserCodesEnabled {
-		notAuthorized := context.Error(401, "not authorized", nil)
-		if params.Code == nil {
-			return notAuthorized
-		}
-		if ok, err := codes.Has(params.Code); err != nil {
-			services.Log.Error()
-			return context.InternalError()
-		} else if !ok {
-			return notAuthorized
-		}
-	}
-
-	if intToken, token, err := c.priorityToken(); err != nil {
+	if err != nil {
 		services.Log.Error(err)
 		return context.InternalError()
-	} else {
-		tokenData := &TokenData{
-			Hash:  params.Hash,
-			Token: token,
-		}
+	}
 
-		tokenKey := c.settings.Key("token")
-		if tokenKey == nil {
-			services.Log.Error("token key missing")
+	defer finalize()
+
+	codes := c.db.Set("codes", []byte("user"))
+
+	tokenKey := c.settings.Key("token")
+	if tokenKey == nil {
+		services.Log.Error("token key missing")
+		return context.InternalError()
+	}
+
+	tokenQueuesMap := transaction.Map("tokens", []byte("queues"))
+	tokenDataMap := transaction.Map("tokens", []byte("data"))
+	queuedTokensSet := transaction.SortedSet("tokens::queued", params.QueueID)
+
+	var queueToken *QueueToken
+	var signedData *services.SignedStringData
+
+	// this is an update call
+	if params.SignedTokenData != nil {
+
+		services.Log.Info("Updating token...")
+
+		signedData = &services.SignedStringData{
+			Data:      params.SignedTokenData.JSON,
+			Signature: params.SignedTokenData.Signature,
+		}
+		if ok, err := tokenKey.VerifyString(signedData); err != nil {
+			services.Log.Error(err)
 			return context.InternalError()
+		} else if !ok {
+			return context.Error(400, "invalid signature", nil)
 		}
-
-		td, err := json.Marshal(tokenData)
-
+		// we retrieve the queue data
+		qd, err := tokenDataMap.Get(params.SignedTokenData.Data.Token)
 		if err != nil {
+			if err == databases.NotFound {
+				return context.NotFound()
+			}
 			services.Log.Error(err)
 			return context.InternalError()
 		}
 
-		if signedData, err := tokenKey.SignString(string(td)); err != nil {
+		if err := json.Unmarshal(qd, &queueToken); err != nil {
+			services.Log.Error(err)
+			return context.InternalError()
+		}
+
+		// we retrieve the queue ID
+		queueID, err := tokenQueuesMap.Get(params.SignedTokenData.Data.Token)
+		if err != nil {
+			if err == databases.NotFound {
+				return context.NotFound()
+			}
+			services.Log.Error(err)
+			return context.InternalError()
+		}
+
+		oldQueuedTokensSet := transaction.SortedSet("tokens::queued", queueID)
+
+		// we delete the token from the old queue
+		if err := oldQueuedTokensSet.Del(qd); err != nil {
+			services.Log.Error(err)
+			return context.InternalError()
+		}
+
+		// we delete the token from the old queues map
+		if err := tokenQueuesMap.Del(params.SignedTokenData.Data.Token); err != nil {
+			services.Log.Error(err)
+			return context.InternalError()
+		}
+
+		// we delete the token from the old token data map
+		if err := tokenDataMap.Del(params.SignedTokenData.Data.Token); err != nil {
+			services.Log.Error(err)
+			return context.InternalError()
+		}
+
+		// we update the queue data and the encrypted data
+		queueToken.QueueData = params.QueueData
+		queueToken.EncryptedData = params.EncryptedData
+
+	} else {
+
+		// this is a new token
+		if c.settings.UserCodesEnabled {
+			notAuthorized := context.Error(401, "not authorized", nil)
+			if params.Code == nil {
+				return notAuthorized
+			}
+			if ok, err := codes.Has(params.Code); err != nil {
+				services.Log.Error()
+				return context.InternalError()
+			} else if !ok {
+				return notAuthorized
+			}
+		}
+
+		if intToken, token, err := c.priorityToken(); err != nil {
 			services.Log.Error(err)
 			return context.InternalError()
 		} else {
-			queueToken := &QueueToken{
-				Position:      int64(intToken),
-				Token:         token,
-				QueueData:     params.QueueData,
-				EncryptedData: params.EncryptedData,
+			tokenData := &TokenData{
+				Hash:  params.Hash,
+				Token: token,
 			}
-			qd, err := json.Marshal(queueToken)
+
+			td, err := json.Marshal(tokenData)
+
 			if err != nil {
 				services.Log.Error(err)
 				return context.InternalError()
 			}
 
-			ss := c.db.SortedSet("tokens::queued", params.QueueID)
-
-			if err := ss.Add(qd, int64(intToken)); err != nil {
+			if signedData, err = tokenKey.SignString(string(td)); err != nil {
 				services.Log.Error(err)
 				return context.InternalError()
-			}
-
-			// we delete the user code
-			if c.settings.UserCodesEnabled {
-				if err := codes.Del(params.Code); err != nil {
-					services.Log.Error(err)
-					return context.InternalError()
+			} else {
+				queueToken = &QueueToken{
+					Position:      int64(intToken),
+					Token:         token,
+					QueueData:     params.QueueData,
+					EncryptedData: params.EncryptedData,
 				}
 			}
-			return context.Result(signedData)
 		}
 	}
+
+	// we store the new or updated queue token in the given queue
+	qd, err := json.Marshal(queueToken)
+	if err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+
+	// we remember which queue this token is in
+	if err := tokenQueuesMap.Set(queueToken.Token, params.QueueID); err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+
+	// we remember the value of the token data
+	if err := tokenDataMap.Set(queueToken.Token, qd); err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+
+	if err := queuedTokensSet.Add(qd, queueToken.Position); err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+
+	// we delete the user code
+	if c.settings.UserCodesEnabled {
+		if err := codes.Del(params.Code); err != nil {
+			services.Log.Error(err)
+			return context.InternalError()
+		}
+	}
+
+	success = true
+
+	return context.Result(signedData)
+
 }
 
 // provider-only endpoints
@@ -1697,7 +2478,6 @@ var CapacityForm = forms.Form{
 			Validators: []forms.Validator{
 				forms.IsInteger{
 					HasMin: true,
-					HasMax: false,
 					Min:    1,
 				},
 			},
@@ -1739,6 +2519,9 @@ var tws = []services.TimeWindowFunc{
 // get n tokens from the given queue IDs
 func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueueTokensParams) *jsonrpc.Response {
 
+	tokenQueuesMap := c.db.Map("tokens", []byte("queues"))
+	tokenDataMap := c.db.Map("tokens", []byte("data"))
+
 	// make sure this is a valid provider asking for tokens
 	resp, providerKey := c.isProvider(context, []byte(params.JSON), params.Signature, params.PublicKey)
 
@@ -1774,11 +2557,52 @@ func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueue
 						if err := json.Unmarshal(entry.Data, &qt); err != nil {
 							continue
 						}
+						if qt.QueueData == nil {
+							qt.QueueData = &TokenQueueData{}
+						}
 						qt.Queue = queueID
+
+						match := true
+
+						// user isn't in the same zip code area, we check distances
+						if qt.QueueData.ZipCode != pkd.QueueData.ZipCode {
+							if distance, err := c.getDistance("zipCode", qt.QueueData.ZipCode, pkd.QueueData.ZipCode); err != nil {
+								match = false
+							} else {
+								if distance > float64(qt.QueueData.Distance) {
+									match = false
+								}
+							}
+						}
+
+						// user needs an accessible provider but this isn't the case
+						if qt.QueueData.Accessible && !pkd.QueueData.Accessible {
+							match = false
+						}
+
+						if !match {
+							// we put the token back on the queue as it doesn't match...
+							if err := ssq.Add(entry.Data, qt.Position); err != nil {
+								services.Log.Error(err)
+							}
+							continue
+						}
+
 						// we add the token to the selected tokens for this queue
 						if err := sss.Add(entry.Data, entry.Score); err != nil {
 							services.Log.Error(err)
 						}
+
+						// we delete the token from the old queues map
+						if err := tokenQueuesMap.Del(qt.Token); err != nil {
+							services.Log.Error(err)
+						}
+
+						// we delete the token from the old token data map
+						if err := tokenDataMap.Del(qt.Token); err != nil {
+							services.Log.Error(err)
+						}
+
 						tokens = append(tokens, qt)
 						addedTokens += 1
 						// we go to the next queue to ensure tokens are taken
@@ -1840,7 +2664,7 @@ func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueue
 
 			// statistics by zip code
 			if err := addTokenStats(tw, map[string]string{
-				"zipCode": pkd.ZipCode,
+				"zipCode": pkd.QueueData.ZipCode,
 			}); err != nil {
 				services.Log.Error(err)
 			}
@@ -1933,20 +2757,15 @@ type StoreProviderDataData struct {
 	Code          []byte                      `json:"code"`
 }
 
-// { id, encryptedData, code }, keyPair
-func (c *Appointments) storeProviderData(context *jsonrpc.Context, params *StoreProviderDataParams) *jsonrpc.Response {
-
+func (c *Appointments) transaction(success *bool) (services.Transaction, func(), error) {
 	transaction, err := c.db.Begin()
 
 	if err != nil {
-		services.Log.Error(err)
-		return context.InternalError()
+		return nil, nil, err
 	}
 
-	success := false
-
 	finalize := func() {
-		if success {
+		if *success {
 			if err := transaction.Commit(); err != nil {
 				services.Log.Error(err)
 			}
@@ -1957,20 +2776,59 @@ func (c *Appointments) storeProviderData(context *jsonrpc.Context, params *Store
 		}
 	}
 
+	return transaction, finalize, nil
+
+}
+
+// { id, encryptedData, code }, keyPair
+func (c *Appointments) storeProviderData(context *jsonrpc.Context, params *StoreProviderDataParams) *jsonrpc.Response {
+
+	success := false
+	transaction, finalize, err := c.transaction(&success)
+
+	if err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+
 	defer finalize()
 
 	providerData := transaction.Map("providerData", []byte("unverified"))
+	codes := transaction.Set("codes", []byte("provider"))
 
-	if c.settings.ProviderCodesEnabled {
+	existingData := false
+	if result, err := providerData.Get(params.Data.ID); err != nil {
+		if err != databases.NotFound {
+			services.Log.Error(err)
+			return context.InternalError()
+		}
+	} else if result != nil {
+		existingData = true
+	}
+
+	providerID := append([]byte("providerData::"), params.Data.ID...)
+
+	// we verify the signature (without veryfing e.g. the provenance of the key)
+	if ok, err := crypto.VerifyWithBytes([]byte(params.JSON), params.Signature, params.PublicKey); err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	} else if !ok {
+		return context.Error(400, "invalid signature", nil)
+	}
+
+	if existingData {
+		if result := c.verifyPermissions(context, transaction, providerID, []string{"write"}, params.PublicKey); result != nil {
+			return result
+		}
+	} else if c.settings.ProviderCodesEnabled {
 		notAuthorized := context.Error(401, "not authorized", nil)
-		if params.Data.Code == nil {
+		if params.Data.Code == nil && !existingData {
 			return notAuthorized
 		}
-		codes := transaction.Set("codes", []byte("provider"))
 		if ok, err := codes.Has(params.Data.Code); err != nil {
 			services.Log.Error()
 			return context.InternalError()
-		} else if !ok {
+		} else if !ok && !existingData {
 			return notAuthorized
 		}
 	}
@@ -1978,6 +2836,26 @@ func (c *Appointments) storeProviderData(context *jsonrpc.Context, params *Store
 	if err := providerData.Set(params.Data.ID, []byte(params.JSON)); err != nil {
 		services.Log.Error(err)
 		return context.InternalError()
+	}
+
+	permissions := []*Permission{
+		&Permission{
+			Rights: []string{"write", "delete"},
+			Keys:   [][]byte{params.PublicKey},
+		},
+	}
+
+	// we give the provider the right to write and delete this data again
+	if result := c.setPermissions(context, transaction, providerID, permissions, 0); result != nil {
+		return result
+	}
+
+	// we delete the provider code
+	if c.settings.ProviderCodesEnabled {
+		if err := codes.Del(params.Data.Code); err != nil {
+			services.Log.Error(err)
+			return context.InternalError()
+		}
 	}
 
 	success = true
@@ -2056,12 +2934,12 @@ var GetPendingProviderDataDataForm = forms.Form{
 		{
 			Name: "limit",
 			Validators: []forms.Validator{
-				forms.IsOptional{Default: 20},
+				forms.IsOptional{Default: 1000},
 				forms.IsInteger{
 					HasMin: true,
 					HasMax: true,
 					Min:    1,
-					Max:    1000,
+					Max:    10000,
 				},
 			},
 		},
@@ -2124,6 +3002,105 @@ func (c *Appointments) isOnKeyList(context *jsonrpc.Context, data, signature, pu
 	}
 
 	return nil, actorKey
+
+}
+
+var GetVerifiedProviderDataForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "data",
+			Validators: []forms.Validator{
+				forms.IsString{},
+				JSON{
+					Key: "json",
+				},
+				forms.IsStringMap{
+					Form: &GetPendingProviderDataDataForm,
+				},
+			},
+		},
+		{
+			Name: "signature",
+			Validators: []forms.Validator{
+				forms.IsBytes{
+					Encoding:  "base64",
+					MaxLength: 1000,
+					MinLength: 50,
+				},
+			},
+		},
+		{
+			Name: "publicKey",
+			Validators: []forms.Validator{
+				forms.IsOptional{},
+				forms.IsBytes{
+					Encoding:  "base64",
+					MaxLength: 1000,
+					MinLength: 50,
+				},
+			},
+		},
+	},
+}
+
+var GetVerifiedProviderDataDataForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "limit",
+			Validators: []forms.Validator{
+				forms.IsOptional{Default: 1000},
+				forms.IsInteger{
+					HasMin: true,
+					HasMax: true,
+					Min:    1,
+					Max:    10000,
+				},
+			},
+		},
+	},
+}
+
+type GetVerifiedProviderDataParams struct {
+	JSON      string                       `json:"json"`
+	Data      *GetVerifiedProviderDataData `json:"data"`
+	Signature []byte                       `json:"signature"`
+	PublicKey []byte                       `json:"publicKey"`
+}
+
+type GetVerifiedProviderDataData struct {
+	N int64 `json:"n"`
+}
+
+// mediator-only endpoint
+// { limit }, keyPair
+func (c *Appointments) getVerifiedProviderData(context *jsonrpc.Context, params *GetVerifiedProviderDataParams) *jsonrpc.Response {
+
+	if resp, _ := c.isMediator(context, []byte(params.JSON), params.Signature, params.PublicKey); resp != nil {
+		return resp
+	}
+
+	providerData := c.db.Map("providerData", []byte("verified"))
+
+	pd, err := providerData.GetAll()
+
+	if err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+
+	pdEntries := []map[string]interface{}{}
+
+	for _, v := range pd {
+		var m map[string]interface{}
+		if err := json.Unmarshal(v, &m); err != nil {
+			services.Log.Error(err)
+			continue
+		} else {
+			pdEntries = append(pdEntries, m)
+		}
+	}
+
+	return context.Result(pdEntries)
 
 }
 

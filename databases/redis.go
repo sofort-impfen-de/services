@@ -110,8 +110,8 @@ func MakeRedis(settings interface{}) (services.Database, error) {
 }
 
 func (d *Redis) Client() redis.Cmdable {
-	if d.pipeline != nil {
-		return d.pipeline
+	if d.transaction != nil {
+		return d.transaction
 	}
 	return d.client
 }
@@ -147,10 +147,14 @@ func (d *Redis) Begin() (services.Transaction, error) {
 		channel: make(chan bool),
 	}
 
+	started := make(chan bool)
+
 	tx := func(tx *redis.Tx) error {
 		nd.mutex.Lock()
 		nd.transaction = tx
 		nd.mutex.Unlock()
+
+		started <- true
 
 		_, err := tx.Pipelined(func(pipeline redis.Pipeliner) error {
 
@@ -183,10 +187,17 @@ func (d *Redis) Begin() (services.Transaction, error) {
 		}
 	}()
 
+	select {
+	case <-started:
+	case <-time.After(1 * time.Second):
+		return nil, fmt.Errorf("timeout")
+	}
+
 	return nd, nil
 }
 
 func (d *Redis) Commit() error {
+
 	if d.transaction == nil {
 		return fmt.Errorf("not in a transaction")
 	}
@@ -345,6 +356,10 @@ type RedisSortedSet struct {
 
 func (r *RedisSortedSet) Add(data []byte, score int64) error {
 	return r.db.Client().ZAdd(string(r.fullKey), redis.Z{Score: float64(score), Member: string(data)}).Err()
+}
+
+func (r *RedisSortedSet) Del(data []byte) error {
+	return r.db.Client().ZRem(string(r.fullKey), string(data)).Err()
 }
 
 func (r *RedisSortedSet) PopMin(n int64) ([]*services.SortedSetEntry, error) {

@@ -123,6 +123,14 @@ func (k *Key) Verify(data *SignedData) (bool, error) {
 	}
 }
 
+func (k *Key) VerifyString(data *SignedStringData) (bool, error) {
+	if publicKey, err := crypto.LoadPublicKey(k.PublicKey); err != nil {
+		return false, err
+	} else {
+		return crypto.Verify([]byte(data.Data), data.Signature, publicKey)
+	}
+}
+
 func (s *SigningSettings) Key(name string) *Key {
 	return key(s.Keys, name)
 }
