@@ -927,6 +927,7 @@ func (c *Appointments) getListKeys(key string) ([]*ActorKey, error) {
 	mk, err := c.db.Map("keys", []byte(key)).GetAll()
 
 	if err != nil {
+		services.Log.Error(err)
 		return nil, err
 	}
 
@@ -1696,9 +1697,8 @@ var CapacityForm = forms.Form{
 			Validators: []forms.Validator{
 				forms.IsInteger{
 					HasMin: true,
-					HasMax: true,
+					HasMax: false,
 					Min:    1,
-					Max:    100,
 				},
 			},
 		},
@@ -1781,6 +1781,9 @@ func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueue
 						}
 						tokens = append(tokens, qt)
 						addedTokens += 1
+						// we go to the next queue to ensure tokens are taken
+						// in a uniform way from all available queues
+						break
 					}
 				}
 			}
@@ -1788,9 +1791,18 @@ func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueue
 			if addedTokens == 0 {
 				break
 			}
+			// we return at most 100 tokens from one queue
+			if len(tokens) >= 100 {
+				break
+			}
 		}
 		totalTokens += int64(len(tokens))
 		allTokens = append(allTokens, tokens)
+
+		// we return at most 100 tokens in total
+		if totalTokens >= 100 {
+			break
+		}
 	}
 
 	if c.meter != nil {
@@ -1924,14 +1936,37 @@ type StoreProviderDataData struct {
 // { id, encryptedData, code }, keyPair
 func (c *Appointments) storeProviderData(context *jsonrpc.Context, params *StoreProviderDataParams) *jsonrpc.Response {
 
-	providerData := c.db.Map("providerData", []byte("unverified"))
+	transaction, err := c.db.Begin()
+
+	if err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+
+	success := false
+
+	finalize := func() {
+		if success {
+			if err := transaction.Commit(); err != nil {
+				services.Log.Error(err)
+			}
+		} else {
+			if err := transaction.Rollback(); err != nil {
+				services.Log.Error(err)
+			}
+		}
+	}
+
+	defer finalize()
+
+	providerData := transaction.Map("providerData", []byte("unverified"))
 
 	if c.settings.ProviderCodesEnabled {
 		notAuthorized := context.Error(401, "not authorized", nil)
 		if params.Data.Code == nil {
 			return notAuthorized
 		}
-		codes := c.db.Set("codes", []byte("provider"))
+		codes := transaction.Set("codes", []byte("provider"))
 		if ok, err := codes.Has(params.Data.Code); err != nil {
 			services.Log.Error()
 			return context.InternalError()
@@ -1941,8 +1976,11 @@ func (c *Appointments) storeProviderData(context *jsonrpc.Context, params *Store
 	}
 
 	if err := providerData.Set(params.Data.ID, []byte(params.JSON)); err != nil {
+		services.Log.Error(err)
 		return context.InternalError()
 	}
+
+	success = true
 
 	return context.Acknowledge()
 }

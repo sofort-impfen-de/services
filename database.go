@@ -31,20 +31,31 @@ type SettingsValidator func(settings map[string]interface{}) (interface{}, error
 type DatabaseDefinitions map[string]DatabaseDefinition
 type DatabaseMaker func(settings interface{}) (Database, error)
 
-// A database can deliver and accept message
-type Database interface {
-	Close() error
-	Open() error
-
-	Begin() error
-	Commit() error
-	Rollback() error
-
+type DatabaseOps interface {
 	Set(table string, key []byte) Set
 	SortedSet(table string, key []byte) SortedSet
 	List(table string, key []byte) List
 	Map(table string, key []byte) Map
 	Value(table string, key []byte) Value
+}
+
+// A database can deliver and accept message
+type Database interface {
+	Close() error
+	Open() error
+	Begin() (Transaction, error)
+
+	DatabaseOps
+}
+
+type Transaction interface {
+	// Watch keys for changes while in a transaction
+	Watch(...string) error
+
+	Commit() error
+	Rollback() error
+
+	DatabaseOps
 }
 
 type Object interface {

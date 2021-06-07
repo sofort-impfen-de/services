@@ -68,16 +68,8 @@ func (d *InMemory) Close() error {
 	return nil
 }
 
-func (d *InMemory) Begin() error {
-	return nil
-}
-
-func (d *InMemory) Commit() error {
-	return nil
-}
-
-func (d *InMemory) Rollback() error {
-	return nil
+func (d *InMemory) Begin() (services.Transaction, error) {
+	return nil, nil
 }
 
 func (d *InMemory) Set(table string, key []byte) services.Set {
