@@ -138,7 +138,7 @@ func uploadDistances(settings *services.Settings) func(c *cli.Context) error {
 
 			j := i + N
 			if j >= len(allDistances) {
-				j = len(allDistances) - 1
+				j = len(allDistances)
 			}
 
 			services.Log.Infof("Submitting distances [%d, %d] from %d in total...", i, j, len(allDistances))
