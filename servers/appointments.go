@@ -2632,8 +2632,10 @@ func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueue
 					continue
 				}
 
-				// we add the token to the selected tokens for this queue
-				if err := sss.Add(entry.Data, entry.Score); err != nil {
+				// We add the token to the selected tokens for this queue
+				// If they don't get removed from the system we can queue
+				// them up again...
+				if err := sss.Add(entry.Data, time.Now().Unix()); err != nil {
 					services.Log.Error(err)
 				}
 
