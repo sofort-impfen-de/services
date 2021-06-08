@@ -472,7 +472,7 @@ func (c *Appointments) confirmProvider(context *jsonrpc.Context, params *Confirm
 	}
 
 	// we give the provider the right to read this data
-	if result := c.setPermissions(context, transaction, params.Data.ID, permissions, ttl); result != nil {
+	if result := c.setPermissions(context, transaction, params.Data.VerifiedID, permissions, ttl); result != nil {
 		return result
 	}
 
@@ -482,13 +482,27 @@ func (c *Appointments) confirmProvider(context *jsonrpc.Context, params *Confirm
 	oldPd, err := unverifiedProviderData.Get(params.Data.ID)
 
 	if err != nil {
-		services.Log.Error(err)
-		return context.InternalError()
+		if err == databases.NotFound {
+			// maybe this provider has already been verified before...
+			if oldPd, err = verifiedProviderData.Get(params.Data.ID); err != nil {
+				if err == databases.NotFound {
+					return context.NotFound()
+				} else {
+					services.Log.Error(err)
+					return context.InternalError()
+				}
+			}
+		} else {
+			services.Log.Error(err)
+			return context.InternalError()
+		}
 	}
 
 	if err := unverifiedProviderData.Del(params.Data.ID); err != nil {
-		services.Log.Error(err)
-		return context.InternalError()
+		if err != databases.NotFound {
+			services.Log.Error(err)
+			return context.InternalError()
+		}
 	}
 
 	if err := verifiedProviderData.Set(params.Data.ID, oldPd); err != nil {
@@ -2309,7 +2323,7 @@ func (c *Appointments) getToken(context *jsonrpc.Context, params *GetTokenParams
 		oldQueuedTokensSet := transaction.SortedSet("tokens::queued", queueID)
 
 		// we delete the token from the old queue
-		if err := oldQueuedTokensSet.Del(qd); err != nil {
+		if _, err := oldQueuedTokensSet.Del(qd); err != nil {
 			services.Log.Error(err)
 			return context.InternalError()
 		}
@@ -2538,81 +2552,105 @@ func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueue
 		return context.InternalError()
 	}
 
+	queuePositions := map[string]int64{}
+
+	for _, queueID := range pkd.Queues {
+		queuePositions[string(queueID)] = 0
+	}
+
 	var totalCapacity, totalTokens int64
 	// to do: better balancing and check queue data
 	for _, capacity := range params.Data.Capacities {
 		totalCapacity += capacity.N
 		tokens := []*QueueToken{}
 		for len(tokens) < int(capacity.N) {
-			addedTokens := 0
+			noMoreTokens := true
 			for _, queueID := range pkd.Queues {
 				ssq := c.db.SortedSet("tokens::queued", []byte(queueID))
 				sss := c.db.SortedSet("tokens::selected", []byte(queueID))
-				if entries, err := ssq.PopMin(capacity.N); err != nil {
-					services.Log.Error(err)
+
+				position := queuePositions[string(queueID)]
+
+				// we retrieve the token at the current position, without
+				// removing it from the queue...
+				entry, err := ssq.At(position)
+
+				position += 1
+				queuePositions[string(queueID)] = position
+
+				if err != nil {
+					services.Log.Debugf("No more entries at position %d", position-1)
+					if err != databases.NotFound {
+						services.Log.Error(err)
+					}
 					continue
-				} else {
-					for _, entry := range entries {
-						var qt *QueueToken
-						if err := json.Unmarshal(entry.Data, &qt); err != nil {
-							continue
-						}
-						if qt.QueueData == nil {
-							qt.QueueData = &TokenQueueData{}
-						}
-						qt.Queue = queueID
+				}
 
-						match := true
+				services.Log.Debugf("Got an entry at position %d", position-1)
 
-						// user isn't in the same zip code area, we check distances
-						if qt.QueueData.ZipCode != pkd.QueueData.ZipCode {
-							if distance, err := c.getDistance("zipCode", qt.QueueData.ZipCode, pkd.QueueData.ZipCode); err != nil {
-								match = false
-							} else {
-								if distance > float64(qt.QueueData.Distance) {
-									match = false
-								}
-							}
-						}
+				noMoreTokens = false
 
-						// user needs an accessible provider but this isn't the case
-						if qt.QueueData.Accessible && !pkd.QueueData.Accessible {
+				var qt *QueueToken
+				if err := json.Unmarshal(entry.Data, &qt); err != nil {
+					continue
+				}
+
+				if qt.QueueData == nil {
+					qt.QueueData = &TokenQueueData{}
+				}
+
+				qt.Queue = queueID
+				match := true
+
+				// user isn't in the same zip code area, we check distances
+				if qt.QueueData.ZipCode != pkd.QueueData.ZipCode {
+					if distance, err := c.getDistance("zipCode", qt.QueueData.ZipCode, pkd.QueueData.ZipCode); err != nil {
+						match = false
+					} else {
+						if distance > float64(qt.QueueData.Distance) {
 							match = false
 						}
-
-						if !match {
-							// we put the token back on the queue as it doesn't match...
-							if err := ssq.Add(entry.Data, qt.Position); err != nil {
-								services.Log.Error(err)
-							}
-							continue
-						}
-
-						// we add the token to the selected tokens for this queue
-						if err := sss.Add(entry.Data, entry.Score); err != nil {
-							services.Log.Error(err)
-						}
-
-						// we delete the token from the old queues map
-						if err := tokenQueuesMap.Del(qt.Token); err != nil {
-							services.Log.Error(err)
-						}
-
-						// we delete the token from the old token data map
-						if err := tokenDataMap.Del(qt.Token); err != nil {
-							services.Log.Error(err)
-						}
-
-						tokens = append(tokens, qt)
-						addedTokens += 1
-						// we go to the next queue to ensure tokens are taken
-						// in a uniform way from all available queues
-						break
 					}
 				}
+
+				// user needs an accessible provider but this isn't the case
+				if qt.QueueData.Accessible && !pkd.QueueData.Accessible {
+					match = false
+				}
+
+				if !match {
+					continue
+				}
+
+				services.Log.Debugf("Found a match!")
+
+				if ok, err := ssq.Del(entry.Data); err != nil {
+					services.Log.Error(err)
+					continue
+				} else if !ok {
+					// someone already grabbed this token
+					continue
+				}
+
+				// we add the token to the selected tokens for this queue
+				if err := sss.Add(entry.Data, entry.Score); err != nil {
+					services.Log.Error(err)
+				}
+
+				// we delete the token from the old queues map
+				if err := tokenQueuesMap.Del(qt.Token); err != nil {
+					services.Log.Error(err)
+				}
+
+				// we delete the token from the old token data map
+				if err := tokenDataMap.Del(qt.Token); err != nil {
+					services.Log.Error(err)
+				}
+
+				tokens = append(tokens, qt)
 			}
 			// no more tokens left it seems
-			if addedTokens == 0 {
+			if noMoreTokens {
 				break
 			}
 			// we return at most 100 tokens from one queue

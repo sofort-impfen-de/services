@@ -362,8 +362,26 @@ func (r *RedisSortedSet) Add(data []byte, score int64) error {
 	return r.db.Client().ZAdd(string(r.fullKey), redis.Z{Score: float64(score), Member: string(data)}).Err()
 }
 
-func (r *RedisSortedSet) Del(data []byte) error {
-	return r.db.Client().ZRem(string(r.fullKey), string(data)).Err()
+func (r *RedisSortedSet) Del(data []byte) (bool, error) {
+	n, err := r.db.Client().ZRem(string(r.fullKey), string(data)).Result()
+	return n > 0, err
+}
+
+func (r *RedisSortedSet) At(index int64) (*services.SortedSetEntry, error) {
+	result, err := r.db.Client().ZRangeWithScores(string(r.fullKey), index, index).Result()
+	if err != nil {
+		return nil, err
+	}
+	if len(result) == 0 {
+		return nil, NotFound
+	}
+
+	z := result[0]
+
+	return &services.SortedSetEntry{
+		Score: int64(z.Score),
+		Data:  []byte(z.Member.(string)),
+	}, nil
 }
 
 func (r *RedisSortedSet) PopMin(n int64) ([]*services.SortedSetEntry, error) {
