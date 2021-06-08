@@ -2523,6 +2523,7 @@ type Capacity struct {
 
 var tws = []services.TimeWindowFunc{
 	services.Minute,
+	services.QuarterHour,
 	services.Hour,
 	services.Day,
 	services.Week,
