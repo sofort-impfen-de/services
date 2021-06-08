@@ -2323,9 +2323,12 @@ func (c *Appointments) getToken(context *jsonrpc.Context, params *GetTokenParams
 		oldQueuedTokensSet := transaction.SortedSet("tokens::queued", queueID)
 
 		// we delete the token from the old queue
-		if _, err := oldQueuedTokensSet.Del(qd); err != nil {
+		if ok, err := oldQueuedTokensSet.Del(qd); err != nil {
 			services.Log.Error(err)
 			return context.InternalError()
+		} else if !ok {
+			// the token isn't in the queue anymore
+			return context.NotFound()
 		}
 
 		// we delete the token from the old queues map
@@ -2534,9 +2537,6 @@ var tws = []services.TimeWindowFunc{
 // get n tokens from the given queue IDs
 func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueueTokensParams) *jsonrpc.Response {
 
-	tokenQueuesMap := c.db.Map("tokens", []byte("queues"))
-	tokenDataMap := c.db.Map("tokens", []byte("data"))
-
 	// make sure this is a valid provider asking for tokens
 	resp, providerKey := c.isProvider(context, []byte(params.JSON), params.Signature, params.PublicKey)
 
@@ -2637,16 +2637,6 @@ func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueue
 				// If they don't get removed from the system we can queue
 				// them up again...
 				if err := sss.Add(entry.Data, time.Now().Unix()); err != nil {
-					services.Log.Error(err)
-				}
-
-				// we delete the token from the old queues map
-				if err := tokenQueuesMap.Del(qt.Token); err != nil {
-					services.Log.Error(err)
-				}
-
-				// we delete the token from the old token data map
-				if err := tokenDataMap.Del(qt.Token); err != nil {
 					services.Log.Error(err)
 				}
 
