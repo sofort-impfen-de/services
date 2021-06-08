@@ -50,6 +50,18 @@ func Minute(value int64) TimeWindow {
 	}
 }
 
+func QuarterHour(value int64) TimeWindow {
+	t := time.Unix(value/1e9, value%1e9).UTC()
+	q := t.Minute() / 15
+	from := time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), q*15, 0, 0, t.Location())
+	to := from.Add(time.Minute * 15)
+	return TimeWindow{
+		From: from.UnixNano(),
+		To:   to.UnixNano(),
+		Type: "quarterHour",
+	}
+}
+
 func Hour(value int64) TimeWindow {
 	t := time.Unix(value/1e9, value%1e9).UTC()
 	from := time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), 0, 0, 0, t.Location())
@@ -107,6 +119,8 @@ func MakeTimeWindow(t int64, twType string) TimeWindow {
 		return Minute(t)
 	case "hour":
 		return Hour(t)
+	case "quarterHour":
+		return QuarterHour(t)
 	case "day":
 		return Day(t)
 	case "week":
@@ -135,6 +149,9 @@ func (t *TimeWindow) IncreaseBy(n int64) {
 	case "minute":
 		from = from.Add(time.Minute * time.Duration(n))
 		to = to.Add(time.Minute * time.Duration(n))
+	case "quarterHour":
+		from = from.Add(time.Minute * time.Duration(15*n))
+		to = to.Add(time.Minute * time.Duration(15*n))
 	case "hour":
 		from = from.Add(time.Hour * time.Duration(n))
 		to = to.Add(time.Hour * time.Duration(n))

@@ -172,6 +172,8 @@ func (r *Redis) getTimeId(t int64, twType string) int64 {
 	case "second":
 		// we return the current minute
 		return day.Add(time.Minute*time.Duration(tm.Minute()) + time.Hour*time.Duration(tm.Hour())).Unix()
+	case "quarterHour":
+		fallthrough
 	case "minute":
 		// we return the current hour
 		return day.Add(time.Hour * time.Duration(tm.Hour())).Unix()
@@ -201,8 +203,11 @@ func (r *Redis) increaseTimeId(tId, n int64, twType string) int64 {
 	case "minute":
 		// we store an entire hour (60 minutes) per interval
 		return tm.Add(time.Duration(n) * time.Hour).Unix()
+	case "quarterHour":
+		// we store an entire day
+		return tm.AddDate(0, 0, int(n)).Unix()
 	case "hour":
-		// we store two entire week (168 hours)
+		// we store an entire week (168 hours)
 		return tm.AddDate(0, 0, 7*int(n)).Unix()
 	case "day":
 		// we store three entire months (90 days)
