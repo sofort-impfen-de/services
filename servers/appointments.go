@@ -3301,7 +3301,7 @@ var GetStatsForm = forms.Form{
 		{
 			Name: "type",
 			Validators: []forms.Validator{
-				forms.IsIn{Choices: []interface{}{"minute", "hour", "day", "week", "month"}},
+				forms.IsIn{Choices: []interface{}{"minute", "hour", "day", "quarterHour", "week", "month"}},
 			},
 		},
 		{
