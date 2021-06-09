@@ -45,6 +45,10 @@ build-backend-production:
     # If this is a tagged release, we tag the image with it.
     - if [ -n "$CI_COMMIT_TAG" ]; then docker tag "${IMAGE_SPACE}/services:${CI_COMMIT_SHORT_SHA} ${IMAGE_SPACE}/services:${CI_COMMIT_TAG}"; fi;
     - if [ -n "$CI_COMMIT_TAG" ]; then docker push ${IMAGE_SPACE}/services:${CI_COMMIT_TAG}; fi;
+  only:
+    refs:
+      - master
+      - main
 
 deploy-backend-production:
   environment: production
@@ -56,6 +60,10 @@ deploy-backend-production:
     - curl -X POST "https://rundeck.sofort-impfen.de/api/19/job/41ae0e39-2b00-42d2-808b-7797e4d5c692/run?authtoken=${RUNDECK_TOKEN}" --header "Content-Type:text/xml"
   variables:
     GIT_STRATEGY: none
+  only:
+    refs:
+      - master
+      - main
 
 ## Staging
 build-backend-staging:
