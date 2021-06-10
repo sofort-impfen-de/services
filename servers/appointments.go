@@ -1762,7 +1762,12 @@ var PermissionForm = forms.Form{
 			Validators: []forms.Validator{
 				forms.IsList{
 					Validators: []forms.Validator{
-						forms.IsBytes{Encoding: "base64", MaxLength: 200, MinLength: 32},
+						forms.Or{
+							Options: [][]forms.Validator{
+								[]forms.Validator{forms.IsBytes{Encoding: "base64", MaxLength: 200, MinLength: 32}},
+								[]forms.Validator{forms.IsBytes{Encoding: "base64", MaxLength: 0, MinLength: 0}}, // empty ID (i.e. anyone can access)
+							},
+						},
 					},
 				},
 			},
@@ -1958,7 +1963,7 @@ func (c *Appointments) verifyPermissions(context *jsonrpc.Context, transaction s
 	}
 	for _, permission := range permissions {
 		for _, pk := range permission.Keys {
-			if bytes.Equal(pk, publicKey) {
+			if len(pk) == 0 || bytes.Equal(pk, publicKey) {
 				for _, requiredRight := range rights {
 					found := false
 					for _, right := range permission.Rights {
