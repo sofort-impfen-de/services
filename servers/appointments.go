@@ -17,6 +17,7 @@
 package servers
 
 import (
+	"math"
 	"bytes"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -1893,6 +1894,7 @@ func (c *Appointments) verifyGrant(context *jsonrpc.Context, transaction service
 		// not the right object ID
 		return notAuthorized
 	}
+	services.Log.Info(grant.Data.ExpiresAt)
 	if time.Now().After(grant.Data.ExpiresAt) {
 		// grant is already expired
 		return notAuthorized
@@ -2678,11 +2680,11 @@ func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueue
 				return err
 			}
 			// we add the maximum of capacity that a given provider had
-			if err := c.meter.AddMax("queues", "capacities", uid, data, tw, totalCapacity); err != nil {
+			if err := c.meter.AddMax("queues", "capacities", uid, data, tw, int64(math.Min(100, float64(totalCapacity)))); err != nil {
 				return err
 			}
 			// we add the maximum of the difference between capacity and available tokens
-			if err := c.meter.AddMax("queues", "oversupply", uid, data, tw, totalCapacity-totalTokens); err != nil {
+			if err := c.meter.AddMax("queues", "oversupply", uid, data, tw, int64(math.Min(100, float64(totalCapacity-totalTokens)))); err != nil {
 				return err
 			}
 			return nil
