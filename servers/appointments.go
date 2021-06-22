@@ -2831,11 +2831,12 @@ func (c *Appointments) storeProviderData(context *jsonrpc.Context, params *Store
 
 	defer finalize()
 
+	verifiedProviderData := transaction.Map("providerData", []byte("verified"))
 	providerData := transaction.Map("providerData", []byte("unverified"))
 	codes := transaction.Set("codes", []byte("provider"))
 
 	existingData := false
-	if result, err := providerData.Get(params.Data.ID); err != nil {
+	if result, err := verifiedProviderData.Get(params.Data.ID); err != nil {
 		if err != databases.NotFound {
 			services.Log.Error(err)
 			return context.InternalError()
@@ -2860,13 +2861,13 @@ func (c *Appointments) storeProviderData(context *jsonrpc.Context, params *Store
 		}
 	} else if c.settings.ProviderCodesEnabled {
 		notAuthorized := context.Error(401, "not authorized", nil)
-		if params.Data.Code == nil && !existingData {
+		if params.Data.Code == nil {
 			return notAuthorized
 		}
 		if ok, err := codes.Has(params.Data.Code); err != nil {
 			services.Log.Error()
 			return context.InternalError()
-		} else if !ok && !existingData {
+		} else if !ok {
 			return notAuthorized
 		}
 	}
