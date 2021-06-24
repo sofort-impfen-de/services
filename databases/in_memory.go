@@ -72,6 +72,10 @@ func (d *InMemory) Begin() (services.Transaction, error) {
 	return nil, nil
 }
 
+func (d *InMemory) Expire(table string, key []byte, ttl int64) error {
+	return nil
+}
+
 func (d *InMemory) Set(table string, key []byte) services.Set {
 	return nil
 }

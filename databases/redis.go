@@ -234,6 +234,10 @@ func (d *Redis) Rollback() error {
 	return nil
 }
 
+func (d *Redis) Expire(table string, key []byte, ttl int64) error {
+	return d.Client().Expire(string(d.fullKey(table, key)), time.Second*time.Duration(ttl)).Err()
+}
+
 func (d *Redis) Set(table string, key []byte) services.Set {
 	return &RedisSet{
 		db:      d,
@@ -352,6 +356,16 @@ func (r *RedisValue) Del() error {
 type RedisSortedSet struct {
 	db      *Redis
 	fullKey []byte
+}
+
+func (r *RedisSortedSet) Score(data []byte) (int64, error) {
+	n, err := r.db.Client().ZScore(string(r.fullKey), string(data)).Result()
+	if err == redis.Nil {
+		return 0, NotFound
+	} else if err != nil {
+		return 0, err
+	}
+	return int64(n), nil
 }
 
 func (r *RedisSortedSet) Add(data []byte, score int64) error {

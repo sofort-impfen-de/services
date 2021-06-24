@@ -32,6 +32,7 @@ type DatabaseDefinitions map[string]DatabaseDefinition
 type DatabaseMaker func(settings interface{}) (Database, error)
 
 type DatabaseOps interface {
+	Expire(table string, key []byte, ttl int64) error
 	Set(table string, key []byte) Set
 	SortedSet(table string, key []byte) SortedSet
 	List(table string, key []byte) List
@@ -78,6 +79,7 @@ type SortedSet interface {
 	Del([]byte) (bool, error)
 	Add([]byte, int64) error
 	At(int64) (*SortedSetEntry, error)
+	Score([]byte) (int64, error)
 	PopMin(int64) ([]*SortedSetEntry, error)
 }
 

@@ -17,7 +17,6 @@
 package servers
 
 import (
-	"math"
 	"bytes"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -31,6 +30,7 @@ import (
 	kbForms "github.com/kiebitz-oss/services/forms"
 	"github.com/kiebitz-oss/services/jsonrpc"
 	"github.com/kiprotect/go-helpers/forms"
+	"math"
 	"regexp"
 	"sort"
 	"strings"
@@ -1894,11 +1894,12 @@ func (c *Appointments) verifyGrant(context *jsonrpc.Context, transaction service
 		// not the right object ID
 		return notAuthorized
 	}
-	services.Log.Info(grant.Data.ExpiresAt)
+
 	if time.Now().After(grant.Data.ExpiresAt) {
 		// grant is already expired
 		return notAuthorized
 	}
+
 	// we check if the grant can be used only once
 	if grant.Data.SingleUse {
 		grants := transaction.Set("grants", []byte("data"))
@@ -2259,7 +2260,6 @@ type TokenQueueData struct {
 
 //{hash, encryptedData, queueID, queueData, signedTokenData}
 // get a token for a given queue
-// to do: handle updating tokens (necessary?)
 func (c *Appointments) getToken(context *jsonrpc.Context, params *GetTokenParams) *jsonrpc.Response {
 
 	success := false
@@ -2283,6 +2283,7 @@ func (c *Appointments) getToken(context *jsonrpc.Context, params *GetTokenParams
 	tokenQueuesMap := transaction.Map("tokens", []byte("queues"))
 	tokenDataMap := transaction.Map("tokens", []byte("data"))
 	queuedTokensSet := transaction.SortedSet("tokens::queued", params.QueueID)
+	activeTokensSet := transaction.SortedSet("tokens", []byte("active"))
 
 	var queueToken *QueueToken
 	var signedData *services.SignedStringData
@@ -2290,7 +2291,7 @@ func (c *Appointments) getToken(context *jsonrpc.Context, params *GetTokenParams
 	// this is an update call
 	if params.SignedTokenData != nil {
 
-		services.Log.Info("Updating token...")
+		services.Log.Debug("Updating token...")
 
 		signedData = &services.SignedStringData{
 			Data:      params.SignedTokenData.JSON,
@@ -2400,6 +2401,10 @@ func (c *Appointments) getToken(context *jsonrpc.Context, params *GetTokenParams
 		}
 	}
 
+	// we add the current unix nanosecond time to the score, so that tokens which are
+	// active will always be preferred to inactive ones...
+	now := time.Now().UnixNano()
+
 	// we store the new or updated queue token in the given queue
 	qd, err := json.Marshal(queueToken)
 	if err != nil {
@@ -2419,17 +2424,49 @@ func (c *Appointments) getToken(context *jsonrpc.Context, params *GetTokenParams
 		return context.InternalError()
 	}
 
-	if err := queuedTokensSet.Add(qd, queueToken.Position); err != nil {
+	// active tokens get a bonus
+	if err := queuedTokensSet.Add(qd, queueToken.Position-now); err != nil {
 		services.Log.Error(err)
 		return context.InternalError()
 	}
 
-	// we delete the user code
-	if c.settings.UserCodesEnabled {
-		if err := codes.Del(params.Code); err != nil {
-			services.Log.Error(err)
-			return context.InternalError()
+	// we keep a list of active tokens so that we can delete inactive ones...
+	if err := activeTokensSet.Add(qd, now); err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+
+	if params.SignedTokenData == nil {
+		// if this is a new token we delete the user code
+		if c.settings.UserCodesEnabled {
+			if err := codes.Del(params.Code); err != nil {
+				services.Log.Error(err)
+				return context.InternalError()
+			}
 		}
+	}
+
+	if c.meter != nil {
+		// we generate the UID of the provider, which is the hash of its public key
+		uid := crypto.Hash(queueToken.Token)
+		hexUID := hex.EncodeToString(uid)
+		data := map[string]string{
+			"zipCode": queueToken.QueueData.ZipCode,
+		}
+
+		for _, twt := range tws {
+
+			// generate the time window
+			tw := twt(now)
+
+			// we add the info that this token is active
+			if err := c.meter.AddOnce("tokens", "active", hexUID, data, tw, 1); err != nil {
+				services.Log.Error(err)
+				continue
+			}
+
+		}
+
 	}
 
 	success = true
@@ -2492,6 +2529,17 @@ var GetQueueTokensDataForm = forms.Form{
 				},
 			},
 		},
+		{
+			Name: "expiration",
+			Validators: []forms.Validator{
+				forms.IsInteger{
+					HasMin: true,
+					Min:    60,
+					HasMax: true,
+					Max:    60 * 60 * 24,
+				},
+			},
+		},
 	},
 }
 
@@ -2502,7 +2550,25 @@ var CapacityForm = forms.Form{
 			Validators: []forms.Validator{
 				forms.IsInteger{
 					HasMin: true,
-					Min:    1,
+					Min:    0,
+				},
+			},
+		},
+		{
+			Name: "open",
+			Validators: []forms.Validator{
+				forms.IsInteger{
+					HasMin: true,
+					Min:    0,
+				},
+			},
+		},
+		{
+			Name: "booked",
+			Validators: []forms.Validator{
+				forms.IsInteger{
+					HasMin: true,
+					Min:    0,
 				},
 			},
 		},
@@ -2524,10 +2590,13 @@ type GetQueueTokensParams struct {
 
 type GetQueueTokensData struct {
 	Capacities []*Capacity `json:"capacities"`
+	Expiration int64       `json:"expiration"`
 }
 
 type Capacity struct {
 	N          int64                  `json:"n"`
+	Open       int64                  `json:"open"`
+	Booked     int64                  `json:"booked"`
 	Properties map[string]interface{} `json:"properties"`
 }
 
@@ -2551,6 +2620,10 @@ func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueue
 		return resp
 	}
 
+	// we generate the UID of the provider, which is the hash of its public key
+	uid := crypto.Hash(params.PublicKey)
+	hexUID := hex.EncodeToString(uid)
+
 	allTokens := [][]*QueueToken{}
 
 	pkd, err := providerKey.ProviderKeyData()
@@ -2566,16 +2639,26 @@ func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueue
 		queuePositions[string(queueID)] = 0
 	}
 
-	var totalCapacity, totalTokens int64
+	// we remember which tokens a given provider received
+	sss := c.db.SortedSet("tokens::received", uid)
+
+	if err := c.db.Expire("tokens::received", uid, 60*60*24*14); err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+
+	var totalCapacity, totalTokens, totalOpen, totalBooked int64
 	// to do: better balancing and check queue data
 	for _, capacity := range params.Data.Capacities {
 		totalCapacity += capacity.N
+		totalOpen += capacity.Open
+		totalBooked += capacity.Booked
 		tokens := []*QueueToken{}
 		for len(tokens) < int(capacity.N) {
 			noMoreTokens := true
 			for _, queueID := range pkd.Queues {
+
 				ssq := c.db.SortedSet("tokens::queued", []byte(queueID))
-				sss := c.db.SortedSet("tokens::selected", []byte(queueID))
 
 				position := queuePositions[string(queueID)]
 
@@ -2594,7 +2677,7 @@ func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueue
 					continue
 				}
 
-				services.Log.Debugf("Got an entry at position %d", position-1)
+				services.Log.Debugf("Got an entry at position %d (score: %d)", position-1, entry.Score)
 
 				noMoreTokens = false
 
@@ -2632,11 +2715,18 @@ func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueue
 
 				services.Log.Debugf("Found a match!")
 
-				if ok, err := ssq.Del(entry.Data); err != nil {
-					services.Log.Error(err)
-					continue
-				} else if !ok {
-					// someone already grabbed this token
+				score, err := sss.Score(entry.Data)
+
+				services.Log.Debugf("Token last sent to provider at %d", score)
+
+				if err != nil {
+					if err != databases.NotFound {
+						services.Log.Error(err)
+						return context.InternalError()
+					}
+				} else if time.Now().Unix()-score < params.Data.Expiration {
+					// this token was already given to the provider recently, so
+					// we do not return it anymore...
 					continue
 				}
 
@@ -2653,7 +2743,7 @@ func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueue
 			if noMoreTokens {
 				break
 			}
-			// we return at most 100 tokens from one queue
+			// we return at most 100 tokens
 			if len(tokens) >= 100 {
 				break
 			}
@@ -2669,9 +2759,6 @@ func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueue
 
 	if c.meter != nil {
 
-		// by convention all values in the meter DB are hex-encoded
-		uid := hex.EncodeToString(crypto.Hash(params.PublicKey))
-
 		now := time.Now().UTC().UnixNano()
 
 		addTokenStats := func(tw services.TimeWindow, data map[string]string) error {
@@ -2680,11 +2767,23 @@ func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueue
 				return err
 			}
 			// we add the maximum of capacity that a given provider had
-			if err := c.meter.AddMax("queues", "capacities", uid, data, tw, int64(math.Min(100, float64(totalCapacity)))); err != nil {
+			if err := c.meter.AddMax("queues", "capacities", hexUID, data, tw, int64(math.Min(100, float64(totalCapacity)))); err != nil {
+				return err
+			}
+			// we add the maximum of the open appointments
+			if err := c.meter.AddMax("queues", "open", hexUID, data, tw, int64(math.Min(1000, float64(totalOpen)))); err != nil {
+				return err
+			}
+			// we add the maximum of the booked appointments
+			if err := c.meter.AddMax("queues", "booked", hexUID, data, tw, int64(math.Min(1000, float64(totalBooked)))); err != nil {
 				return err
 			}
 			// we add the maximum of the difference between capacity and available tokens
-			if err := c.meter.AddMax("queues", "oversupply", uid, data, tw, int64(math.Min(100, float64(totalCapacity-totalTokens)))); err != nil {
+			if err := c.meter.AddMax("queues", "oversupply", hexUID, data, tw, int64(math.Min(100, float64(totalCapacity-totalTokens)))); err != nil {
+				return err
+			}
+			// we add the info that this provider is active
+			if err := c.meter.AddOnce("queues", "active", hexUID, data, tw, 1); err != nil {
 				return err
 			}
 			return nil
