@@ -1418,7 +1418,7 @@ func (c *Appointments) getData(context *jsonrpc.Context, params *GetDataParams) 
 	}
 
 	// we make sure the user has the permission to read this data
-	if result := c.verifyPermissions(context, transaction, params.Data.ID, []string{"read"}, params.PublicKey); result != nil {
+	if result := c.verifyPermissions(context, transaction, params.Data.ID, []string{"read"}, params.PublicKey, false); result != nil {
 		return result
 	}
 
@@ -1526,7 +1526,7 @@ func (c *Appointments) bulkGetData(context *jsonrpc.Context, params *BulkGetData
 	for _, id := range params.Data.IDs {
 
 		// we make sure the user has the permission to read this data
-		if result := c.verifyPermissions(context, transaction, id, []string{"read"}, params.PublicKey); result != nil {
+		if result := c.verifyPermissions(context, transaction, id, []string{"read"}, params.PublicKey, false); result != nil {
 			results = append(results, nil)
 			continue
 		}
@@ -1655,12 +1655,16 @@ func (c *Appointments) bulkStoreData(context *jsonrpc.Context, params *BulkStore
 		return context.Error(400, "invalid signature", nil)
 	}
 
+	responses := make([]*jsonrpc.Error, 0)
+
 	for _, sdd := range params.Data.DataList {
-		if result := c.storeDataHelper(context, params.JSON, params.PublicKey, params.Signature, sdd); result != nil {
-			return result
+		if response := c.storeDataHelper(context, params.JSON, params.PublicKey, params.Signature, sdd); response != nil {
+			responses = append(responses, response.Error)
+		} else {
+			responses = append(responses, nil)
 		}
 	}
-	return context.Acknowledge()
+	return context.Result(responses)
 }
 
 var StoreDataForm = forms.Form{
@@ -1940,7 +1944,7 @@ func (c *Appointments) verifyGrant(context *jsonrpc.Context, transaction service
 	return notAuthorized
 }
 
-func (c *Appointments) verifyPermissions(context *jsonrpc.Context, transaction services.Transaction, id []byte, rights []string, publicKey []byte) *jsonrpc.Response {
+func (c *Appointments) verifyPermissions(context *jsonrpc.Context, transaction services.Transaction, id []byte, rights []string, publicKey []byte, isProvider bool) *jsonrpc.Response {
 
 	notAuthorized := context.Error(401, "not authorized", nil)
 	permissionObj := transaction.Value("permissions", id)
@@ -1948,6 +1952,10 @@ func (c *Appointments) verifyPermissions(context *jsonrpc.Context, transaction s
 
 	if err != nil {
 		if err == databases.NotFound {
+			if isProvider {
+				// providers can create data
+				return nil
+			}
 			return notAuthorized
 		} else {
 			return context.InternalError()
@@ -2005,6 +2013,11 @@ func (c *Appointments) setPermissions(context *jsonrpc.Context, transaction serv
 		return context.InternalError()
 	}
 
+	if err := c.db.Expire("permissions", id, 60*60*24*c.settings.DataTTLDays); err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+
 	return nil
 }
 
@@ -2032,6 +2045,10 @@ func (c *Appointments) storeDataHelper(context *jsonrpc.Context, jsonData string
 		isProvider = true
 	}
 
+	if err == databases.NotFound {
+		return context.NotFound()
+	}
+
 	// only providers can directly write data to the backend
 	if !isProvider {
 		// we check if there's a grant included with the request
@@ -2042,11 +2059,16 @@ func (c *Appointments) storeDataHelper(context *jsonrpc.Context, jsonData string
 			} else if result := c.setPermissions(context, transaction, data.ID, data.Grant.Data.Permissions, ttl); result != nil {
 				return result
 			}
-		} else if result := c.verifyPermissions(context, transaction, data.ID, []string{"write"}, publicKey); result != nil {
+		} else if result := c.verifyPermissions(context, transaction, data.ID, []string{"write"}, publicKey, false); result != nil {
 			return result
 		}
-	} else if result := c.setPermissions(context, transaction, data.ID, data.Permissions, ttl); result != nil {
-		return result
+	} else {
+		if result := c.verifyPermissions(context, transaction, data.ID, []string{"write"}, publicKey, true); result != nil {
+			return result
+		}
+		if result := c.setPermissions(context, transaction, data.ID, data.Permissions, ttl); result != nil {
+			return result
+		}
 	}
 
 	if dv, err := json.Marshal(data.Data); err != nil {
@@ -2055,8 +2077,10 @@ func (c *Appointments) storeDataHelper(context *jsonrpc.Context, jsonData string
 	} else if err := value.Set(dv, ttl); err != nil {
 		services.Log.Error(err)
 		return context.InternalError()
+	} else if err := c.db.Expire("data", data.ID, 60*60*24*c.settings.DataTTLDays); err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
 	} else {
-
 		success = true
 		return nil
 	}
@@ -2955,7 +2979,7 @@ func (c *Appointments) storeProviderData(context *jsonrpc.Context, params *Store
 	}
 
 	if existingData {
-		if result := c.verifyPermissions(context, transaction, providerID, []string{"write"}, params.PublicKey); result != nil {
+		if result := c.verifyPermissions(context, transaction, providerID, []string{"write"}, params.PublicKey, true); result != nil {
 			return result
 		}
 	} else if c.settings.ProviderCodesEnabled {
@@ -3392,7 +3416,7 @@ var GetStatsForm = forms.Form{
 		{
 			Name: "id",
 			Validators: []forms.Validator{
-				forms.IsIn{Choices: []interface{}{"queues"}},
+				forms.IsIn{Choices: []interface{}{"queues", "tokens"}},
 			},
 		},
 		{
@@ -3406,6 +3430,13 @@ var GetStatsForm = forms.Form{
 			Validators: []forms.Validator{
 				forms.IsOptional{Default: ""},
 				forms.MatchesRegex{Regex: regexp.MustCompile(`^[\w\d\-]{0,50}$`)},
+			},
+		},
+		{
+			Name: "filter",
+			Validators: []forms.Validator{
+				forms.IsOptional{},
+				forms.IsStringMap{},
 			},
 		},
 		{
@@ -3435,12 +3466,13 @@ var GetStatsForm = forms.Form{
 }
 
 type GetStatsParams struct {
-	ID   string     `json:"id"`
-	Type string     `json:"type"`
-	Name string     `json:"name"`
-	From *time.Time `json:"from"`
-	To   *time.Time `json:"to"`
-	N    *int64     `json:"n"`
+	ID     string                 `json:"id"`
+	Type   string                 `json:"type"`
+	Filter map[string]interface{} `json:"filter"`
+	Name   string                 `json:"name"`
+	From   *time.Time             `json:"from"`
+	To     *time.Time             `json:"to"`
+	N      *int64                 `json:"n"`
 }
 
 type StatsValue struct {
@@ -3503,10 +3535,20 @@ func (c *Appointments) getStats(context *jsonrpc.Context, params *GetStatsParams
 
 	values := make([]*StatsValue, 0)
 
+addMetric:
 	for _, metric := range metrics {
 		if metric.Name[0] == '_' {
 			// we skip internal metrics (which start with a '_')
 			continue
+		}
+
+		if params.Filter != nil {
+			for k, v := range params.Filter {
+				if dv, ok := metric.Data[k]; !ok || dv != v {
+					// filter value is missing or does not match
+					continue addMetric
+				}
+			}
 		}
 
 		values = append(values, &StatsValue{

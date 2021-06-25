@@ -241,6 +241,19 @@ var AppointmentsForm = forms.Form{
 				},
 			},
 		},
+		// how long we want to store settings
+		{
+			Name: "data_ttl_days",
+			Validators: []forms.Validator{
+				forms.IsOptional{Default: 30},
+				forms.IsInteger{
+					HasMin: true,
+					Min:    1,
+					HasMax: true,
+					Max:    60,
+				},
+			},
+		},
 		{
 			Name: "provider_codes_enabled",
 			Validators: []forms.Validator{

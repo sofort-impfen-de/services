@@ -30,6 +30,7 @@ type StorageSettings struct {
 }
 
 type AppointmentsSettings struct {
+	DataTTLDays          int64                  `json:"data_ttl_days"`
 	RPC                  *JSONRPCServerSettings `json:"rpc"`
 	Keys                 []*Key                 `json:"keys"`
 	Secret               []byte                 `json:"secret"`
