@@ -2487,6 +2487,10 @@ func (c *Appointments) getToken(context *jsonrpc.Context, params *GetTokenParams
 
 	success = true
 
+	if params.SignedTokenData != nil {
+		return context.Acknowledge()
+	}
+
 	return context.Result(signedData)
 
 }
