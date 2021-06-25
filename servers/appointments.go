@@ -2013,11 +2013,6 @@ func (c *Appointments) setPermissions(context *jsonrpc.Context, transaction serv
 		return context.InternalError()
 	}
 
-	if err := c.db.Expire("permissions", id, 60*60*24*c.settings.DataTTLDays); err != nil {
-		services.Log.Error(err)
-		return context.InternalError()
-	}
-
 	return nil
 }
 
@@ -2033,7 +2028,7 @@ func (c *Appointments) storeDataHelper(context *jsonrpc.Context, jsonData string
 
 	defer finalize()
 
-	ttl := time.Hour * 24 * 120
+	ttl := time.Hour * 24 * time.Duration(c.settings.DataTTLDays)
 	value := transaction.Value("data", data.ID)
 
 	isProvider := false
@@ -2075,9 +2070,6 @@ func (c *Appointments) storeDataHelper(context *jsonrpc.Context, jsonData string
 		services.Log.Error(err)
 		return context.InternalError()
 	} else if err := value.Set(dv, ttl); err != nil {
-		services.Log.Error(err)
-		return context.InternalError()
-	} else if err := c.db.Expire("data", data.ID, 60*60*24*c.settings.DataTTLDays); err != nil {
 		services.Log.Error(err)
 		return context.InternalError()
 	} else {
@@ -2666,7 +2658,7 @@ func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueue
 	// we remember which tokens a given provider received
 	sss := c.db.SortedSet("tokens::received", uid)
 
-	if err := c.db.Expire("tokens::received", uid, 60*60*24*14); err != nil {
+	if err := c.db.Expire("tokens::received", uid, time.Hour*24*14); err != nil {
 		services.Log.Error(err)
 		return context.InternalError()
 	}

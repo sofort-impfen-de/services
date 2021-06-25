@@ -234,8 +234,8 @@ func (d *Redis) Rollback() error {
 	return nil
 }
 
-func (d *Redis) Expire(table string, key []byte, ttl int64) error {
-	return d.Client().Expire(string(d.fullKey(table, key)), time.Second*time.Duration(ttl)).Err()
+func (d *Redis) Expire(table string, key []byte, ttl time.Duration) error {
+	return d.Client().Expire(string(d.fullKey(table, key)), ttl).Err()
 }
 
 func (d *Redis) Set(table string, key []byte) services.Set {

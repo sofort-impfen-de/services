@@ -32,7 +32,7 @@ type DatabaseDefinitions map[string]DatabaseDefinition
 type DatabaseMaker func(settings interface{}) (Database, error)
 
 type DatabaseOps interface {
-	Expire(table string, key []byte, ttl int64) error
+	Expire(table string, key []byte, ttl time.Duration) error
 	Set(table string, key []byte) Set
 	SortedSet(table string, key []byte) SortedSet
 	List(table string, key []byte) List
