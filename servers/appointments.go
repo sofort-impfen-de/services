@@ -1134,7 +1134,7 @@ func (c *Appointments) getQueues(context *jsonrpc.Context, params *GetQueuesPara
 							// the distance is too far
 							continue
 						}
-					}					
+					}
 				}
 
 				// we remove the encrypted private key from the queue
@@ -2299,11 +2299,11 @@ type QueueToken struct {
 }
 
 type TokenQueueData struct {
-	ZipCode    string `json:"zipCode"`
-	Accessible bool   `json:"accessible"`
-	Distance   int64  `json:"distance"`
-	OfferReceived bool `json:"offerReceived"`
-	OfferAccepted bool `json:"offerAccepted"`
+	ZipCode       string `json:"zipCode"`
+	Accessible    bool   `json:"accessible"`
+	Distance      int64  `json:"distance"`
+	OfferReceived bool   `json:"offerReceived"`
+	OfferAccepted bool   `json:"offerAccepted"`
 }
 
 //{hash, encryptedData, queueID, queueData, signedTokenData}
@@ -2626,6 +2626,16 @@ var CapacityForm = forms.Form{
 			},
 		},
 		{
+			Name: "tokens",
+			Validators: []forms.Validator{
+				forms.IsOptional{Default: 0},
+				forms.IsInteger{
+					HasMin: true,
+					Min:    0,
+				},
+			},
+		},
+		{
 			Name: "properties",
 			Validators: []forms.Validator{
 				forms.IsStringMap{},
@@ -2648,6 +2658,7 @@ type GetQueueTokensData struct {
 
 type Capacity struct {
 	N          int64                  `json:"n"`
+	Tokens     int64                  `json:"tokens"`
 	Open       int64                  `json:"open"`
 	Booked     int64                  `json:"booked"`
 	Properties map[string]interface{} `json:"properties"`
@@ -2700,11 +2711,12 @@ func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueue
 		return context.InternalError()
 	}
 
-	var totalCapacity, totalTokens, totalOpen, totalBooked int64
+	var totalCapacity, totalTokens, totalOpen, totalOpenTokens, totalBooked int64
 	// to do: better balancing and check queue data
 	for _, capacity := range params.Data.Capacities {
 		totalCapacity += capacity.N
 		totalOpen += capacity.Open
+		totalOpenTokens += capacity.Tokens
 		totalBooked += capacity.Booked
 		tokens := []*QueueToken{}
 		for len(tokens) < int(capacity.N) {
@@ -2715,8 +2727,8 @@ func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueue
 
 				position := queuePositions[string(queueID)]
 
-				if position > 200 {
-					// we only look at the first 200 (most active) tokens...
+				if position > 1000 {
+					// we only look at the first 1000 (most active) tokens...
 					continue
 				}
 
@@ -2825,6 +2837,10 @@ func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueue
 		addTokenStats := func(tw services.TimeWindow, data map[string]string) error {
 			// we add the number of tokens that were returned
 			if err := c.meter.Add("queues", "tokens", data, tw, totalTokens); err != nil {
+				return err
+			}
+			// we add the number of open tokens of the app
+			if err := c.meter.Add("queues", "openTokens", data, tw, int64(math.Min(2000, float64(totalOpenTokens)))); err != nil {
 				return err
 			}
 			// we add the maximum of capacity that a given provider had
