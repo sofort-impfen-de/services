@@ -2715,6 +2715,11 @@ func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueue
 
 				position := queuePositions[string(queueID)]
 
+				if position > 200 {
+					// we only look at the first 200 (most active) tokens...
+					continue
+				}
+
 				// we retrieve the token at the current position, without
 				// removing it from the queue...
 				entry, err := ssq.At(position)
