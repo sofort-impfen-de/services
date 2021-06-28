@@ -65,6 +65,12 @@ kiebitz admin codes upload data/user-codes.json
 kiebitz admin codes upload data/provider-codes.json
 ```
 
+To generate codes, simply run the `make_codes.py` script. The following snippet will create 100.000 new codes for providers and users and store them in files named `user-codes-prod.json` and `provider-codes-prod.json` in the `data` directory:
+
+```bash
+python3 .scripts/make_codes.py prod 100000
+```
+
 ## Testing
 
 Here's how you can send a request to the storage server via `curl` (this assumes you have `jq` installed for parsing of the JSON result):
