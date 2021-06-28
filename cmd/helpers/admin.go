@@ -161,9 +161,12 @@ func uploadDistances(settings *services.Settings) func(c *cli.Context) error {
 
 			request := jsonrpc.MakeRequest("uploadDistances", "", signedData.AsMap())
 
-			if _, err := client.Call(request); err != nil {
+			if response, err := client.Call(request); err != nil {
 				services.Log.Fatal(err)
+			} else {
+				services.Log.Info(response.AsJSON())
 			}
+
 		}
 
 		return nil
