@@ -32,7 +32,7 @@ var UploadDistancesForm = forms.Form{
 		{
 			Name: "type",
 			Validators: []forms.Validator{
-				forms.IsIn{Choices: []interface{}{"zipCode"}},
+				forms.IsIn{Choices: []interface{}{"zipCode", "zipArea"}},
 			},
 		},
 		{

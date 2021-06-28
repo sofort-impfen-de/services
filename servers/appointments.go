@@ -803,7 +803,7 @@ var DistancesDataForm = forms.Form{
 		{
 			Name: "type",
 			Validators: []forms.Validator{
-				forms.IsIn{Choices: []interface{}{"zipCode"}},
+				forms.IsIn{Choices: []interface{}{"zipCode", "zipArea"}},
 			},
 		},
 		{
@@ -1121,9 +1121,25 @@ func (c *Appointments) getQueues(context *jsonrpc.Context, params *GetQueuesPara
 	} else {
 		relevantQueues := []*services.Queue{}
 		for _, queue := range queues.Queues {
-			if queue.Type == "zipArea" && strings.HasPrefix(params.ZipCode, queue.Name) {
+			if queue.Type == "zipArea" {
+
+				if params.ZipCode[0:len(queue.Name)] != queue.Name {
+					if distance, err := c.getDistance("zipArea", params.ZipCode[0:len(queue.Name)], queue.Name); err != nil {
+						if err != databases.NotFound {
+							services.Log.Error(err)
+						}
+						continue
+					} else {
+						if distance > float64(params.Radius) {
+							// the distance is too far
+							continue
+						}
+					}					
+				}
+
 				// we remove the encrypted private key from the queue
 				queue.EncryptedPrivateKey = nil
+
 				relevantQueues = append(relevantQueues, queue)
 			}
 		}
@@ -2181,6 +2197,20 @@ var TokenQueueDataForm = forms.Form{
 				forms.IsBoolean{},
 			},
 		},
+		{
+			Name: "offerReceived",
+			Validators: []forms.Validator{
+				forms.IsOptional{Default: false},
+				forms.IsBoolean{},
+			},
+		},
+		{
+			Name: "offerAccepted",
+			Validators: []forms.Validator{
+				forms.IsOptional{Default: false},
+				forms.IsBoolean{},
+			},
+		},
 	},
 }
 
@@ -2272,6 +2302,8 @@ type TokenQueueData struct {
 	ZipCode    string `json:"zipCode"`
 	Accessible bool   `json:"accessible"`
 	Distance   int64  `json:"distance"`
+	OfferReceived bool `json:"offerReceived"`
+	OfferAccepted bool `json:"offerAccepted"`
 }
 
 //{hash, encryptedData, queueID, queueData, signedTokenData}
@@ -2336,33 +2368,34 @@ func (c *Appointments) getToken(context *jsonrpc.Context, params *GetTokenParams
 
 		// we retrieve the queue ID
 		queueID, err := tokenQueuesMap.Get(params.SignedTokenData.Data.Token)
-		if err != nil {
-			if err == databases.NotFound {
+		if err != nil && err != databases.NotFound {
+			services.Log.Error(err)
+			return context.InternalError()
+		}
+
+		if queueID != nil {
+
+			oldQueuedTokensSet := transaction.SortedSet("tokens::queued", queueID)
+
+			// we delete the token from the old queue
+			if ok, err := oldQueuedTokensSet.Del(qd); err != nil {
+				services.Log.Error(err)
+				return context.InternalError()
+			} else if !ok {
+				// the token isn't in the queue anymore
 				return context.NotFound()
 			}
-			services.Log.Error(err)
-			return context.InternalError()
-		}
 
-		oldQueuedTokensSet := transaction.SortedSet("tokens::queued", queueID)
+			// we delete the token from the old queues map
+			if err := tokenQueuesMap.Del(params.SignedTokenData.Data.Token); err != nil {
+				services.Log.Error(err)
+				return context.InternalError()
+			}
 
-		// we delete the token from the old queue
-		if ok, err := oldQueuedTokensSet.Del(qd); err != nil {
-			services.Log.Error(err)
-			return context.InternalError()
-		} else if !ok {
-			// the token isn't in the queue anymore
-			return context.NotFound()
-		}
-
-		// we delete the token from the old queues map
-		if err := tokenQueuesMap.Del(params.SignedTokenData.Data.Token); err != nil {
-			services.Log.Error(err)
-			return context.InternalError()
 		}
 
 		// we delete the token from the old token data map
-		if err := tokenDataMap.Del(params.SignedTokenData.Data.Token); err != nil {
+		if err := tokenDataMap.Del(params.SignedTokenData.Data.Token); err != nil && err != databases.NotFound {
 			services.Log.Error(err)
 			return context.InternalError()
 		}
@@ -2716,6 +2749,9 @@ func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueue
 				// user isn't in the same zip code area, we check distances
 				if qt.QueueData.ZipCode != pkd.QueueData.ZipCode {
 					if distance, err := c.getDistance("zipCode", qt.QueueData.ZipCode, pkd.QueueData.ZipCode); err != nil {
+						if err != databases.NotFound {
+							services.Log.Error(err)
+						}
 						match = false
 					} else {
 						if distance > float64(qt.QueueData.Distance) {
