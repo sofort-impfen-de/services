@@ -473,7 +473,7 @@ func (c *Appointments) confirmProvider(context *jsonrpc.Context, params *Confirm
 	}
 
 	// we give the provider the right to read this data
-	if result := c.setPermissions(context, transaction, params.Data.VerifiedID, permissions, ttl); result != nil {
+	if result := c.setPermissions(context, transaction, params.Data.VerifiedID, permissions, params.Data.SignedKeyData.Data.Signing, ttl); result != nil {
 		return result
 	}
 
@@ -1658,16 +1658,22 @@ type Permission struct {
 type GrantData struct {
 	ObjectID    []byte        `json:"objectID"`
 	GrantID     []byte        `json:"grantID"`
+	Type        string        `json:"type"`
 	SingleUse   bool          `json:"singleUse"`
 	ExpiresAt   time.Time     `json:"expiresAt"`
 	Permissions []*Permission `json:"permissions"`
 }
 
+type GrantContext struct {
+	SignedTokenData *SignedTokenData `json:"signedTokenData"`
+}
+
 type Grant struct {
-	JSON      string     `json:"json"`
-	Data      *GrantData `json:"data"`
-	Signature []byte     `json:"signature"`
-	PublicKey []byte     `json:"publicKey"`
+	JSON      string        `json:"json"`
+	Data      *GrantData    `json:"data"`
+	Context   *GrantContext `json:"context"`
+	Signature []byte        `json:"signature"`
+	PublicKey []byte        `json:"publicKey"`
 }
 
 // { dataList }, keyPair
@@ -1796,10 +1802,24 @@ var PermissionForm = forms.Form{
 						forms.Or{
 							Options: [][]forms.Validator{
 								[]forms.Validator{forms.IsBytes{Encoding: "base64", MaxLength: 200, MinLength: 32}},
-								[]forms.Validator{forms.IsBytes{Encoding: "base64", MaxLength: 0, MinLength: 0}}, // empty ID (i.e. anyone can access)
+								[]forms.Validator{forms.IsIn{Choices: []interface{}{""}}},
 							},
 						},
 					},
+				},
+			},
+		},
+	},
+}
+
+var GrantContextForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "signedTokenData",
+			Validators: []forms.Validator{
+				forms.IsOptional{},
+				forms.IsStringMap{
+					Form: &SignedTokenDataForm,
 				},
 			},
 		},
@@ -1817,6 +1837,15 @@ var GrantForm = forms.Form{
 				},
 				forms.IsStringMap{
 					Form: &GrantDataForm,
+				},
+			},
+		},
+		{
+			Name: "context",
+			Validators: []forms.Validator{
+				forms.IsOptional{},
+				forms.IsStringMap{
+					Form: &GrantContextForm,
 				},
 			},
 		},
@@ -1863,6 +1892,13 @@ var GrantDataForm = forms.Form{
 			Validators: []forms.Validator{
 				forms.IsOptional{Default: true},
 				forms.IsBoolean{},
+			},
+		},
+		{
+			Name: "type",
+			Validators: []forms.Validator{
+				forms.IsOptional{Default: "default"},
+				forms.IsIn{Choices: []interface{}{"default", "token"}},
 			},
 		},
 		{
@@ -1930,10 +1966,47 @@ func (c *Appointments) verifyGrant(context *jsonrpc.Context, transaction service
 		return notAuthorized
 	}
 
+	// this is a token-based grant
+	if grant.Data.Type == "token" {
+
+		tokenKey := c.settings.Key("token")
+		if tokenKey == nil {
+			services.Log.Error("token key missing")
+			return context.InternalError()
+		}
+
+		signedData := &services.SignedStringData{
+			Data:      grant.Context.SignedTokenData.JSON,
+			Signature: grant.Context.SignedTokenData.Signature,
+		}
+
+		// we make sure this is a valid token
+		if ok, err := tokenKey.VerifyString(signedData); err != nil {
+			services.Log.Error(err)
+			return context.InternalError()
+		} else if !ok {
+			return notAuthorized
+		}
+
+		token := grant.Context.SignedTokenData.Data.Token
+
+		// we check whether the token has already been used
+		grantTokens := transaction.Set("grants", []byte("tokens"))
+		if ok, err := grantTokens.Has(token); err != nil {
+			services.Log.Error(err)
+			return context.InternalError()
+		} else if ok {
+			// this token already has been used
+			return notAuthorized
+		} else if err := grantTokens.Add(token); err != nil {
+			services.Log.Error(err)
+			return context.InternalError()
+		}
+	}
+
 	// we check if the grant can be used only once
 	if grant.Data.SingleUse {
 		grants := transaction.Set("grants", []byte("data"))
-
 		if ok, err := grants.Has(grant.Data.GrantID); err != nil {
 			services.Log.Error(err)
 			return context.InternalError()
@@ -2023,9 +2096,22 @@ func (c *Appointments) verifyPermissions(context *jsonrpc.Context, transaction s
 	return notAuthorized
 }
 
-func (c *Appointments) setPermissions(context *jsonrpc.Context, transaction services.Transaction, id []byte, permissions []*Permission, ttl time.Duration) *jsonrpc.Response {
+func (c *Appointments) setPermissions(context *jsonrpc.Context, transaction services.Transaction, id []byte, permissions []*Permission, publicKey []byte, ttl time.Duration) *jsonrpc.Response {
 
 	permissionObj := transaction.Value("permissions", id)
+
+	for _, permission := range permissions {
+		newKeys := [][]byte{}
+		for _, key := range permission.Keys {
+			if len(key) == 0 {
+				// if this is a wildcard permission object we apply the provided publicKey
+				newKeys = append(newKeys, publicKey)
+			} else {
+				newKeys = append(newKeys, key)
+			}
+		}
+		permission.Keys = newKeys
+	}
 
 	if permissionsBytes, err := json.Marshal(permissions); err != nil {
 		return context.InternalError()
@@ -2077,7 +2163,7 @@ func (c *Appointments) storeDataHelper(context *jsonrpc.Context, jsonData string
 			// we check if the grant is still valid
 			if result := c.verifyGrant(context, transaction, data.ID, []string{"write"}, publicKey, data.Grant); result != nil {
 				return result
-			} else if result := c.setPermissions(context, transaction, data.ID, data.Grant.Data.Permissions, ttl); result != nil {
+			} else if result := c.setPermissions(context, transaction, data.ID, data.Grant.Data.Permissions, publicKey, ttl); result != nil {
 				return result
 			}
 		} else if result := c.verifyPermissions(context, transaction, data.ID, []string{"write"}, publicKey, false); result != nil {
@@ -2087,7 +2173,7 @@ func (c *Appointments) storeDataHelper(context *jsonrpc.Context, jsonData string
 		if result := c.verifyPermissions(context, transaction, data.ID, []string{"write"}, publicKey, true); result != nil {
 			return result
 		}
-		if result := c.setPermissions(context, transaction, data.ID, data.Permissions, ttl); result != nil {
+		if result := c.setPermissions(context, transaction, data.ID, data.Permissions, publicKey, ttl); result != nil {
 			return result
 		}
 	}
@@ -2733,14 +2819,14 @@ func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueue
 			noMoreTokens := true
 			for _, queueID := range pkd.Queues {
 
-				ssq := c.db.SortedSet("tokens::queued", []byte(queueID))
-
 				position := queuePositions[string(queueID)]
 
 				if position > 1000 || position == -1 {
 					// we only look at the first 1000 (most active) tokens...
 					continue
 				}
+
+				ssq := c.db.SortedSet("tokens::queued", []byte(queueID))
 
 				// we retrieve the token at the current position, without
 				// removing it from the queue...
@@ -3074,7 +3160,7 @@ func (c *Appointments) storeProviderData(context *jsonrpc.Context, params *Store
 	}
 
 	// we give the provider the right to write and delete this data again
-	if result := c.setPermissions(context, transaction, providerID, permissions, 0); result != nil {
+	if result := c.setPermissions(context, transaction, providerID, permissions, params.PublicKey, 0); result != nil {
 		return result
 	}
 
