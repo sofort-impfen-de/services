@@ -2840,7 +2840,7 @@ func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueue
 				return err
 			}
 			// we add the number of open tokens of the app
-			if err := c.meter.Add("queues", "openTokens", data, tw, int64(math.Min(2000, float64(totalOpenTokens)))); err != nil {
+			if err := c.meter.AddMax("queues", "openTokens", data, tw, int64(math.Min(2000, float64(totalOpenTokens)))); err != nil {
 				return err
 			}
 			// we add the maximum of capacity that a given provider had
