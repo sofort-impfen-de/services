@@ -2524,6 +2524,12 @@ func (c *Appointments) getToken(context *jsonrpc.Context, params *GetTokenParams
 				continue
 			}
 
+			// we add the info that this token is active (without the zip code)
+			if err := c.meter.AddOnce("tokens", "active", hexUID, nil, tw, 1); err != nil {
+				services.Log.Error(err)
+				continue
+			}
+
 		}
 
 	}
