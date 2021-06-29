@@ -45,3 +45,10 @@ appointments:
     #  ca_certificate_file: "$DIR/certs/root.crt"
     #  certificate_file: "$DIR/certs/appointments-1.crt"
     #  key_file: "$DIR/certs/appointments-1.key"
+notification:
+  rpc:
+    bind_address: localhost:7777
+    cors:
+      allowed_hosts: ["http://localhost:8080"]
+      allowed_headers: ["*"]
+      allowed_methods: ["POST"]

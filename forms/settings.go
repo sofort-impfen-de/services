@@ -150,6 +150,19 @@ var StorageForm = forms.Form{
 	},
 }
 
+var NotificationForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "rpc",
+			Validators: []forms.Validator{
+				forms.IsStringMap{
+					Form: &JSONRPCServerSettingsForm,
+				},
+			},
+		},
+	},
+}
+
 var ECDSAParamsForm = forms.Form{
 	Fields: []forms.Field{
 		{
@@ -333,11 +346,11 @@ var SettingsForm = forms.Form{
 			},
 		},
 		{
-			Name: "appointments",
+			Name: "notification",
 			Validators: []forms.Validator{
 				forms.IsOptional{},
 				forms.IsStringMap{
-					Form: &AppointmentsForm,
+					Form: &NotificationForm,
 				},
 			},
 		},

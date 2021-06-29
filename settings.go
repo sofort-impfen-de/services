@@ -38,6 +38,10 @@ type AppointmentsSettings struct {
 	UserCodesEnabled     bool                   `json:"user_codes_enabled"`
 }
 
+type NotificationSettings struct {
+	RPC *JSONRPCServerSettings `json:"rpc"`
+}
+
 func (a *AppointmentsSettings) Key(name string) *Key {
 	return key(a.Keys, name)
 }
@@ -155,6 +159,7 @@ type Settings struct {
 	Definitions  *Definitions          `json:"definitions"`
 	Storage      *StorageSettings      `json:"storage"`
 	Appointments *AppointmentsSettings `json:"appointments"`
+	Notification *NotificationSettings `json:"notification"`
 	Database     *DatabaseSettings     `json:"database"`
 	Meter        *MeterSettings        `json:"meter"`
 	DatabaseObj  Database              `json:"-"`
