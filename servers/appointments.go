@@ -1120,7 +1120,12 @@ func (c *Appointments) getQueues(context *jsonrpc.Context, params *GetQueuesPara
 		return context.InternalError()
 	} else {
 		relevantQueues := []*services.Queue{}
+		var exactMatch *services.Queue
 		for _, queue := range queues.Queues {
+
+			// we remove the encrypted private key from the queue
+			queue.EncryptedPrivateKey = nil
+
 			if queue.Type == "zipArea" {
 
 				if params.ZipCode[0:len(queue.Name)] != queue.Name {
@@ -1135,14 +1140,19 @@ func (c *Appointments) getQueues(context *jsonrpc.Context, params *GetQueuesPara
 							continue
 						}
 					}
+					relevantQueues = append(relevantQueues, queue)
+				} else {
+					exactMatch = queue
+					continue
 				}
-
-				// we remove the encrypted private key from the queue
-				queue.EncryptedPrivateKey = nil
-
-				relevantQueues = append(relevantQueues, queue)
 			}
 		}
+
+		// we make sure the exactly matching queue always gets returned first...
+		if exactMatch != nil {
+			relevantQueues = append([]*services.Queue{exactMatch}, relevantQueues...)
+		}
+
 		return context.Result(relevantQueues)
 	}
 }
@@ -2840,7 +2850,7 @@ func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueue
 				return err
 			}
 			// we add the number of open tokens of the app
-			if err := c.meter.AddMax("queues", "openTokens", data, tw, int64(math.Min(2000, float64(totalOpenTokens)))); err != nil {
+			if err := c.meter.AddMax("queues", "openTokens", hexUID, data, tw, int64(math.Min(2000, float64(totalOpenTokens)))); err != nil {
 				return err
 			}
 			// we add the maximum of capacity that a given provider had
