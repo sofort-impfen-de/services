@@ -2783,7 +2783,7 @@ func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueue
 						match = false
 					} else {
 						services.Log.Debugf("Distance between %s and %s: %.2f (%.2f)", qt.QueueData.ZipCode, pkd.QueueData.ZipCode, distance, float64(qt.QueueData.Distance))
-						if distance > float64(qt.QueueData.Distance) {
+						if distance > 2.0*float64(qt.QueueData.Distance) {
 							match = false
 						}
 					}
