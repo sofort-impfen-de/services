@@ -2803,7 +2803,7 @@ func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueue
 						services.Log.Error(err)
 						return context.InternalError()
 					}
-				} else if time.Now().Unix()-score < params.Data.Expiration && false {
+				} else if time.Now().Unix()-score < params.Data.Expiration {
 					// this token was already given to the provider recently, so
 					// we do not return it anymore...
 					continue
