@@ -35,9 +35,10 @@ type Redis struct {
 }
 
 type RedisSettings struct {
-	Addresses []string `json:"addresses`
-	Database  int64    `json:"database"`
-	Password  string   `json:"password"`
+	MasterName string   `json:"master_name"`
+	Addresses  []string `json:"addresses`
+	Database   int64    `json:"database"`
+	Password   string   `json:"password"`
 }
 
 var RedisForm = forms.Form{
@@ -48,6 +49,13 @@ var RedisForm = forms.Form{
 			Validators: []forms.Validator{
 				forms.IsRequired{},
 				forms.IsStringList{},
+			},
+		},
+		{
+			Name: "master_name",
+			Validators: []forms.Validator{
+				forms.IsOptional{Default: ""},
+				forms.IsString{},
 			},
 		},
 		{
@@ -84,6 +92,7 @@ func MakeRedis(settings interface{}) (services.Database, error) {
 	redisSettings := settings.(RedisSettings)
 
 	options := redis.UniversalOptions{
+		MasterName:   redisSettings.MasterName,
 		Password:     redisSettings.Password,
 		ReadTimeout:  time.Second * 1.0,
 		WriteTimeout: time.Second * 1.0,
