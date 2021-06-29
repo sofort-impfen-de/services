@@ -3626,8 +3626,7 @@ addMetric:
 					if _, ok := metric.Data[k]; ok {
 						continue addMetric
 					}
-				}
-				if dv, ok := metric.Data[k]; !ok || dv != v {
+				} else if dv, ok := metric.Data[k]; !ok || dv != v {
 					// filter value is missing or does not match
 					continue addMetric
 				}
