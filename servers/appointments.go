@@ -3498,6 +3498,13 @@ var GetStatsForm = forms.Form{
 			},
 		},
 		{
+			Name: "metric",
+			Validators: []forms.Validator{
+				forms.IsOptional{Default: ""},
+				forms.MatchesRegex{Regex: regexp.MustCompile(`^[\w\d\-]{0,50}$`)},
+			},
+		},
+		{
 			Name: "filter",
 			Validators: []forms.Validator{
 				forms.IsOptional{},
@@ -3534,6 +3541,7 @@ type GetStatsParams struct {
 	ID     string                 `json:"id"`
 	Type   string                 `json:"type"`
 	Filter map[string]interface{} `json:"filter"`
+	Metric string                 `json:"metric"`
 	Name   string                 `json:"name"`
 	From   *time.Time             `json:"from"`
 	To     *time.Time             `json:"to"`
@@ -3602,6 +3610,9 @@ func (c *Appointments) getStats(context *jsonrpc.Context, params *GetStatsParams
 
 addMetric:
 	for _, metric := range metrics {
+		if params.Metric != "" && metric.Name != params.Metric {
+			continue
+		}
 		if metric.Name[0] == '_' {
 			// we skip internal metrics (which start with a '_')
 			continue
@@ -3609,6 +3620,12 @@ addMetric:
 
 		if params.Filter != nil {
 			for k, v := range params.Filter {
+				// if v is nil we only return metrics without a value for the given key
+				if v == nil {
+					if _, ok := metric.Data[k]; ok {
+						continue addMetric
+					}
+				}
 				if dv, ok := metric.Data[k]; !ok || dv != v {
 					// filter value is missing or does not match
 					continue addMetric
