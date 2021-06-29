@@ -2745,9 +2745,7 @@ func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueue
 				// we retrieve the token at the current position, without
 				// removing it from the queue...
 				entry, err := ssq.At(position)
-
-				position += 1
-				queuePositions[string(queueID)] = position
+				queuePositions[string(queueID)] = position + 1
 
 				if err != nil {
 					services.Log.Debugf("No more entries at position %d", position-1)
@@ -2800,14 +2798,12 @@ func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueue
 
 				score, err := sss.Score(entry.Data)
 
-				services.Log.Debugf("Token last sent to provider at %d", score)
-
 				if err != nil {
 					if err != databases.NotFound {
 						services.Log.Error(err)
 						return context.InternalError()
 					}
-				} else if time.Now().Unix()-score < params.Data.Expiration {
+				} else if time.Now().Unix()-score < params.Data.Expiration && false {
 					// this token was already given to the provider recently, so
 					// we do not return it anymore...
 					continue
@@ -2827,7 +2823,7 @@ func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueue
 				break
 			}
 			// we return at most 100 tokens
-			if len(tokens) >= 100 {
+			if len(tokens) >= 200 {
 				break
 			}
 		}
@@ -2835,7 +2831,7 @@ func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueue
 		allTokens = append(allTokens, tokens)
 
 		// we return at most 100 tokens in total
-		if totalTokens >= 100 {
+		if totalTokens >= 200 {
 			break
 		}
 	}
