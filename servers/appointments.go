@@ -2756,6 +2756,7 @@ func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueue
 				}
 
 				services.Log.Debugf("Got an entry at position %d (score: %d)", position-1, entry.Score)
+				services.Log.Debugf(string(entry.Data))
 
 				noMoreTokens = false
 
@@ -2773,12 +2774,15 @@ func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueue
 
 				// user isn't in the same zip code area, we check distances
 				if qt.QueueData.ZipCode != pkd.QueueData.ZipCode {
+					services.Log.Debugf("Getting distance between %s and %s", qt.QueueData.ZipCode, pkd.QueueData.ZipCode)
 					if distance, err := c.getDistance("zipCode", qt.QueueData.ZipCode, pkd.QueueData.ZipCode); err != nil {
 						if err != databases.NotFound {
 							services.Log.Error(err)
 						}
+						services.Log.Debugf("Distance not found")
 						match = false
 					} else {
+						services.Log.Debugf("Distance between %s and %s: %.2f (%.2f)", qt.QueueData.ZipCode, pkd.QueueData.ZipCode, distance, float64(qt.QueueData.Distance))
 						if distance > float64(qt.QueueData.Distance) {
 							match = false
 						}
@@ -2787,6 +2791,7 @@ func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueue
 
 				// user needs an accessible provider but this isn't the case
 				if qt.QueueData.Accessible && !pkd.QueueData.Accessible {
+					services.Log.Debugf("Accessibility not given...")
 					match = false
 				}
 
@@ -2804,6 +2809,7 @@ func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueue
 						return context.InternalError()
 					}
 				} else if time.Now().Unix()-score < params.Data.Expiration {
+					services.Log.Info("Token was already given to provider...")
 					// this token was already given to the provider recently, so
 					// we do not return it anymore...
 					continue
