@@ -2737,7 +2737,7 @@ func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueue
 
 				position := queuePositions[string(queueID)]
 
-				if position > 1000 {
+				if position > 1000 || position == -1 {
 					// we only look at the first 1000 (most active) tokens...
 					continue
 				}
@@ -2752,6 +2752,7 @@ func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueue
 					if err != databases.NotFound {
 						services.Log.Error(err)
 					}
+					queuePositions[string(queueID)] = -1
 					continue
 				}
 
