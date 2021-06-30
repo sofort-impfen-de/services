@@ -93,6 +93,7 @@ func MakeRedis(settings interface{}) (services.Meter, error) {
 	redisSettings := settings.(RedisSettings)
 
 	options := redis.UniversalOptions{
+		MasterName:   redisSettings.MasterName,
 		Password:     redisSettings.Password,
 		ReadTimeout:  time.Second * 1.0,
 		WriteTimeout: time.Second * 1.0,
