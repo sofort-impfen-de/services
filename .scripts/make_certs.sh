@@ -3,7 +3,7 @@
 
 # You can addd an entry to this list to generate a certificate for the given
 # actors.
-declare -a certs=("mediator-1" "notifier-1" "storage-1" "appointments-1" "master-1")
+declare -a certs=("mediator-1" "notifier-1" "storage-1" "appointments-1" "master-1" "notification-1")
 declare -a encryptionKeys=( "encrypt-providerData" )
 declare -a signingKeys=("sign-root" "sign-token" )
 declare -A groups=(["mediator-1"]="mediators" ["notifier-1"]="notifiers")
