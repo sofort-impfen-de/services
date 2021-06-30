@@ -36,9 +36,10 @@ type Redis struct {
 }
 
 type RedisSettings struct {
-	Addresses []string `json:"addresses`
-	Database  int64    `json:"database"`
-	Password  string   `json:"password"`
+	MasterName string   `json:"master_name"`
+	Addresses  []string `json:"addresses`
+	Database   int64    `json:"database"`
+	Password   string   `json:"password"`
 }
 
 var RedisForm = forms.Form{
@@ -56,6 +57,13 @@ var RedisForm = forms.Form{
 			Validators: []forms.Validator{
 				forms.IsOptional{Default: 0},
 				forms.IsInteger{Min: 0, Max: 100},
+			},
+		},
+		{
+			Name: "master_name",
+			Validators: []forms.Validator{
+				forms.IsOptional{Default: ""},
+				forms.IsString{},
 			},
 		},
 		{
