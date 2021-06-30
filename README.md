@@ -22,6 +22,11 @@ make certs
 
 ## Running
 
+Start redis:
+```bash
+docker run -d -p 6379:6379 redis
+```
+
 To run the development services is easy:
 
 ```bash
