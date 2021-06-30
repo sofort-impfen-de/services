@@ -125,6 +125,53 @@ var MeterForm = forms.Form{
 	},
 }
 
+var MailForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "smtp_host",
+			Validators: []forms.Validator{
+				forms.IsString{},
+			},
+		},
+		{
+			Name: "smtp_port",
+			Validators: []forms.Validator{
+				forms.IsInteger{},
+			},
+		},
+		{
+			Name: "smtp_user",
+			Validators: []forms.Validator{
+				forms.IsString{},
+			},
+		},
+		{
+			Name: "smtp_password",
+			Validators: []forms.Validator{
+				forms.IsString{},
+			},
+		},
+		{
+			Name: "sender",
+			Validators: []forms.Validator{
+				forms.IsString{},
+			},
+		},
+		{
+			Name: "mail_subject",
+			Validators: []forms.Validator{
+				forms.IsString{},
+			},
+		},
+		{
+			Name: "mail_template",
+			Validators: []forms.Validator{
+				forms.IsString{},
+			},
+		},
+	},
+}
+
 var StorageForm = forms.Form{
 	Fields: []forms.Field{
 		{
@@ -157,6 +204,14 @@ var NotificationForm = forms.Form{
 			Validators: []forms.Validator{
 				forms.IsStringMap{
 					Form: &JSONRPCServerSettingsForm,
+				},
+			},
+		},
+		{
+			Name: "mail",
+			Validators: []forms.Validator{
+				forms.IsStringMap{
+					Form: &MailForm,
 				},
 			},
 		},

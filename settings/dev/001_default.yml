@@ -52,3 +52,15 @@ notification:
       allowed_hosts: ["http://localhost:8080"]
       allowed_headers: ["*"]
       allowed_methods: ["POST"]
+  mail:
+    smtp_host: "localhost"
+    smtp_port: 1025
+    smtp_user: "test"
+    smtp_password: "test"
+    sender: "test@sofort-impfen.de"
+    mail_subject: "Neue Impftermine verfügbar!"
+    mail_template: >
+      <html>
+        <h1>This is a test mail</h1>
+        <p>42</p>
+      </html>

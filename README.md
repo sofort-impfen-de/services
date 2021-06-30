@@ -39,6 +39,14 @@ kiebitz run mediator
 kiebitz run storage
 ```
 
+### Notification service
+Start MailHog
+```bash
+echo "test:\$2a\$04\$qxRo.ftFoNep7ld/5jfKtuBTnGqff/fZVyj53mUC5sVf9dtDLAi/S" >> /tmp/example-auth
+#pw: test
+docker run -d -p 1025:1025 -p 8025:8025 -v /tmp/example-auth:/example/example-auth mailhog/mailhog -auth-file=/example/example-auth
+```
+
 ## Provisioning
 
 For a working system you will need queue data and cryptographic keys. You can generate queues for all zip codes using the `make_queues.py` command to which you pass a file with the encrypted queue keys:

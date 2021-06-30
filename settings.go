@@ -39,7 +39,8 @@ type AppointmentsSettings struct {
 }
 
 type NotificationSettings struct {
-	RPC *JSONRPCServerSettings `json:"rpc"`
+	RPC  *JSONRPCServerSettings `json:"rpc"`
+	Mail *MailSettings          `json:"mail"`
 }
 
 func (a *AppointmentsSettings) Key(name string) *Key {
@@ -199,4 +200,14 @@ type JSONRPCServerSettings struct {
 type HTTPServerSettings struct {
 	TLS         *TLSSettings `json:"tls"`
 	BindAddress string       `json:"bind_address"`
+}
+
+type MailSettings struct {
+	SmtpHost     string `json:"smtp_host"`
+	SmtpPort     int64  `json:"smtp_port"`
+	SmtpUser     string `json:"smtp_user"`
+	SmtpPassword string `json:"smtp_password"`
+	Sender       string `json:"sender"`
+	MailSubject  string `json:"mail_subject"`
+	MailTemplate string `json:"mail_template"`
 }
