@@ -93,7 +93,7 @@ python3 .scripts/make_area_distances.py
 
 ## Signup Codes
 
-You can also upload user & provider codes if you want to restrict who can register on the platform (this requires setting `appointments.user_codes_enabled: true` and `appointments.provider_codes.enabled: true`, respectively):
+We can also upload user & provider codes if we want to restrict who can register on the platform (this requires setting `appointments.user_codes_enabled: true` and `appointments.provider_codes.enabled: true`, respectively):
 
 ```bash
 # upload user codes from a file
@@ -102,7 +102,7 @@ kiebitz admin codes upload data/secret-user-codes.json
 kiebitz admin codes upload data/secret-provider-codes.json
 ```
 
-To generate codes, simply run
+To generate codes, we simply run
 
 ```bash
 # generate 10.000 user codes
@@ -125,7 +125,7 @@ to generate these certificates, and then enable them by commenting out the `tls`
 
 ## Running
 
-To run the development services is easy:
+To run the development services we can then
 
 ```bash
 # run the appointments service
