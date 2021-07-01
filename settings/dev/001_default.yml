@@ -33,6 +33,7 @@ admin:
     storage_endpoint: "http://localhost:9999/jsonrpc"
 appointments:
   provider_codes_enabled: false
+  user_codes_enabled: false
   keys: []
   rpc:
     bind_address: localhost:8888

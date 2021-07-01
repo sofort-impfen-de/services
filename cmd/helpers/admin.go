@@ -17,6 +17,7 @@
 package helpers
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"github.com/kiebitz-oss/services"
@@ -114,7 +115,7 @@ func generateMediatorKeys(settings *services.Settings) func(c *cli.Context) erro
 
 		}
 
-		for _, name := range []string{"queue", "providerData"} {
+		for _, name := range []string{"queue", "provider"} {
 			key := settings.Admin.Signing.Key(name)
 			publicKey, err := crypto.LoadPublicKey(key.PublicKey)
 			if err != nil {
@@ -196,49 +197,87 @@ type QueueData struct {
 func generateQueues(settings *services.Settings) func(c *cli.Context) error {
 
 	return func(c *cli.Context) error {
-		queueKey := settings.Admin.Signing.Key("queue")
-		ephemeralKey, err := crypto.GenerateKey()
 
-		webKey, err := crypto.AsWebKey(ephemeralKey, "ecdh")
+		queues := []*QueueData{}
+
+		queueEncryptionKey := settings.Admin.Signing.Key("queue")
+		queueEncryptionPublicKey, err := crypto.LoadPublicKey(queueEncryptionKey.PublicKey)
+		if err != nil {
+			services.Log.Fatal(err)
+		}
+
+		for _, area := range queueAreas {
+
+			ephemeralKey, err := crypto.GenerateKey()
+
+			if err != nil {
+				services.Log.Fatal(err)
+			}
+
+			ephemeralWebKey, err := crypto.AsWebKey(ephemeralKey, "ecdh")
+
+			if err != nil {
+				services.Log.Fatal(err)
+			}
+
+			queueKey, err := crypto.GenerateKey()
+
+			if err != nil {
+				services.Log.Fatal(err)
+			}
+
+			queueWebKey, err := crypto.AsWebKey(queueKey, "ecdh")
+
+			if err != nil {
+				services.Log.Fatal(err)
+			}
+
+			sharedKey := crypto.DeriveKey(queueEncryptionPublicKey, ephemeralKey)
+
+			jsonKey, err := json.Marshal(queueWebKey.PrivateKey)
+
+			if err != nil {
+				services.Log.Fatal(err)
+			}
+
+			encryptedData, err := crypto.Encrypt(jsonKey, sharedKey)
+
+			if err != nil {
+				services.Log.Fatal(err)
+			}
+
+			id, err := crypto.RandomBytes(32)
+
+			if err != nil {
+				services.Log.Fatal(err)
+			}
+
+			queueData := &QueueData{
+				EncryptedPrivateKey: &EncryptedPrivateQueueKey{
+					IV:        encryptedData.IV,
+					Data:      encryptedData.Data,
+					PublicKey: ephemeralWebKey.PublicKey,
+				},
+				PublicKey: queueWebKey.PublicKey,
+				Name:      area,
+				Type:      "zipArea",
+				ID:        id,
+				Data: map[string]interface{}{
+					"zipArea": area,
+				},
+			}
+
+			queues = append(queues, queueData)
+
+		}
+
+		jsonData, err := json.MarshalIndent(map[string]interface{}{"queues": queues}, "", "  ")
 
 		if err != nil {
 			services.Log.Fatal(err)
 		}
 
-		if err != nil {
-			services.Log.Fatal(err)
-		}
-
-		queuePublicKey, err := crypto.LoadPublicKey(queueKey.PublicKey)
-		if err != nil {
-			services.Log.Fatal(err)
-		}
-
-		sharedKey := crypto.DeriveKey(queuePublicKey, ephemeralKey)
-
-		encryptedData, err := crypto.Encrypt([]byte("this is just a test"), sharedKey)
-
-		if err != nil {
-			services.Log.Fatal(err)
-		}
-
-		queueData := &QueueData{
-			EncryptedPrivateKey: &EncryptedPrivateQueueKey{
-				IV:        encryptedData.IV,
-				Data:      encryptedData.Data,
-				PublicKey: webKey.PublicKey,
-			},
-			PublicKey: webKey.PublicKey,
-			Name:      "test",
-		}
-
-		jsonData, err := json.Marshal(queueData)
-
-		if err != nil {
-			services.Log.Fatal(err)
-		}
-
-		services.Log.Info(string(jsonData))
+		fmt.Println(string(jsonData))
 
 		return nil
 
@@ -253,10 +292,10 @@ func setupKeys(settings *services.Settings) func(c *cli.Context) error {
 		apptKeys := []*crypto.Key{}
 
 		keys := map[string]string{
-			"root":         "ecdsa",
-			"token":        "ecdsa",
-			"providerData": "ecdh",
-			"queue":        "ecdh",
+			"root":     "ecdsa",
+			"token":    "ecdsa",
+			"provider": "ecdh",
+			"queue":    "ecdh",
 		}
 
 		for name, keyType := range keys {
@@ -342,10 +381,7 @@ func uploadDistances(settings *services.Settings) func(c *cli.Context) error {
 			services.Log.Fatal(err)
 		}
 
-		t := time.Now()
-		distances := &UploadDistances{
-			Timestamp: &t,
-		}
+		distances := &UploadDistances{}
 		var rawDistances map[string]interface{}
 
 		if err := json.Unmarshal(jsonBytes, &rawDistances); err != nil {
@@ -381,6 +417,8 @@ func uploadDistances(settings *services.Settings) func(c *cli.Context) error {
 
 			services.Log.Infof("Submitting distances [%d, %d] from %d in total...", i, j, len(allDistances))
 
+			t := time.Now()
+			distances.Timestamp = &t
 			distances.Distances = allDistances[i:j]
 
 			i += N
@@ -406,6 +444,50 @@ func uploadDistances(settings *services.Settings) func(c *cli.Context) error {
 			}
 
 		}
+
+		return nil
+	}
+}
+
+func generateCodes(settings *services.Settings) func(c *cli.Context) error {
+	return func(c *cli.Context) error {
+
+		if settings.Admin == nil {
+			services.Log.Fatal("admin settings missing")
+		}
+
+		n := c.Int("n")
+
+		if n < 0 || n > 100000 {
+			services.Log.Fatal("n should be between 0 and 100.000")
+		}
+
+		actor := c.String("actor")
+
+		if actor != "user" && actor != "provider" {
+			services.Log.Fatal("actor should be 'user' or 'provider'")
+		}
+
+		codes := []string{}
+
+		for i := 0; i < n; i++ {
+			code, err := crypto.RandomBytes(16)
+			if err != nil {
+				services.Log.Fatal(err)
+			}
+			codes = append(codes, hex.EncodeToString(code))
+		}
+
+		jsonData, err := json.MarshalIndent(map[string]interface{}{
+			"actor": actor,
+			"codes": codes,
+		}, "", "  ")
+
+		if err != nil {
+			services.Log.Fatal(err)
+		}
+
+		fmt.Println(string(jsonData))
 
 		return nil
 	}
@@ -798,6 +880,23 @@ func Admin(settings *services.Settings) ([]cli.Command, error) {
 					Usage: "Codes-related command.",
 					Subcommands: []cli.Command{
 						{
+							Name: "generate",
+							Flags: []cli.Flag{
+								&cli.IntFlag{
+									Name:  "n",
+									Value: 10000,
+									Usage: "number of codes to generate",
+								},
+								&cli.StringFlag{
+									Name:  "actor",
+									Value: "user",
+									Usage: "actor for which to generate codes (user or provider)",
+								},
+							},
+							Usage:  "generate codes for users or providers",
+							Action: generateCodes(settings),
+						},
+						{
 							Name:   "upload",
 							Flags:  []cli.Flag{},
 							Usage:  "upload codes from a file to the backend",
@@ -868,7 +967,7 @@ func Admin(settings *services.Settings) ([]cli.Command, error) {
 					Usage: "Mediators-related command.",
 					Subcommands: []cli.Command{
 						{
-							Name:   "upload-keys",
+							Name:   "upload",
 							Flags:  []cli.Flag{},
 							Usage:  "upload signed keys data for a mediator",
 							Action: uploadMediatorKeys(settings),

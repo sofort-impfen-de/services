@@ -1275,7 +1275,7 @@ func (c *Appointments) getKeysData() (*Keys, error) {
 			Providers: providerKeys,
 			Mediators: mediatorKeys,
 		},
-		ProviderData: c.settings.Key("providerData").PublicKey,
+		ProviderData: c.settings.Key("provider").PublicKey,
 		RootKey:      c.settings.Key("root").PublicKey,
 		TokenKey:     c.settings.Key("token").PublicKey,
 	}, nil
