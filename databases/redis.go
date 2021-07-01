@@ -105,7 +105,7 @@ func MakeRedis(settings interface{}) (services.Database, error) {
 	if _, err := client.Ping().Result(); err != nil {
 		return nil, err
 	} else {
-		services.Log.Debug("Ping to Redis succeeded!")
+		services.Log.Info("Ping to Redis succeeded!")
 	}
 
 	database := &Redis{
