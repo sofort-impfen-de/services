@@ -17,6 +17,7 @@
 package helpers
 
 import (
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -180,26 +181,11 @@ if __name__ == '__main__':
 	main()
 */
 
-type EncryptedPrivateQueueKey struct {
-	IV        []byte `json:"iv"`
-	Data      []byte `json:"data"`
-	PublicKey string `json:"publicKey"`
-}
-
-type QueueData struct {
-	EncryptedPrivateKey *EncryptedPrivateQueueKey `json:"encryptedPrivateKey"`
-	PublicKey           string                    `json:"publicKey"`
-	Type                string                    `json:"type"`
-	Name                string                    `json:"name"`
-	ID                  []byte                    `json:"id"`
-	Data                map[string]interface{}    `json:"data"`
-}
-
 func generateQueues(settings *services.Settings) func(c *cli.Context) error {
 
 	return func(c *cli.Context) error {
 
-		queues := []*QueueData{}
+		queues := []*services.Queue{}
 
 		queueEncryptionKey := settings.Admin.Signing.Key("queue")
 		queueEncryptionPublicKey, err := crypto.LoadPublicKey(queueEncryptionKey.PublicKey)
@@ -253,13 +239,25 @@ func generateQueues(settings *services.Settings) func(c *cli.Context) error {
 				services.Log.Fatal(err)
 			}
 
-			queueData := &QueueData{
-				EncryptedPrivateKey: &EncryptedPrivateQueueKey{
+			decodedEphKey, err := base64.StdEncoding.DecodeString(ephemeralWebKey.PublicKey)
+
+			if err != nil {
+				services.Log.Fatal(err)
+			}
+
+			decodedQueueKey, err := base64.StdEncoding.DecodeString(queueWebKey.PublicKey)
+
+			if err != nil {
+				services.Log.Fatal(err)
+			}
+
+			queueData := &services.Queue{
+				EncryptedPrivateKey: &services.ECDHEncryptedData{
 					IV:        encryptedData.IV,
 					Data:      encryptedData.Data,
-					PublicKey: ephemeralWebKey.PublicKey,
+					PublicKey: decodedEphKey,
 				},
-				PublicKey: queueWebKey.PublicKey,
+				PublicKey: decodedQueueKey,
 				Name:      area,
 				Type:      "zipArea",
 				ID:        id,
@@ -340,7 +338,7 @@ func setupKeys(settings *services.Settings) func(c *cli.Context) error {
 
 		apptSettings := &services.Settings{
 			Appointments: &services.AppointmentsSettings{
-				Keys: apptKeys,
+				Keys:   apptKeys,
 				Secret: secret,
 			},
 		}

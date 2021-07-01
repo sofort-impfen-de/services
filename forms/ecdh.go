@@ -33,16 +33,6 @@ var ECDHEncryptedDataForm = forms.Form{
 			},
 		},
 		{
-			Name: "iv",
-			Validators: []forms.Validator{
-				forms.IsBytes{
-					Encoding:  "base64",
-					MinLength: 10,
-					MaxLength: 20,
-				},
-			},
-		},
-		{
 			Name: "data",
 			Validators: []forms.Validator{
 				forms.IsBytes{
