@@ -7,3 +7,5 @@ Contains a CSV-separated list of the distances for zip code areas in Germany (on
 [zip code A],[zip code B],[distance in km]
 
 The data for the zip codes areas was extracted from OpenStreetMap (© OpenStreetMap contributors). The OSM data is available under the OpenStreetMap license, please look at [the OpenStreetMap website](https://www.openstreetmap.org/copyright) for more information.
+
+The `distances.json` and `distances-areas.json` are generated from this CSV file using the fittingly named Python scripts in the `.scripts` directory.
