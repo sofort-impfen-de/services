@@ -30,7 +30,7 @@ type StorageSettings struct {
 }
 
 type AppointmentsSettings struct {
-	DataTTLDays          int64                  `json:"data_ttl_days"`
+	DataTTLDays          int64                  `json:"data_ttl_days,omitempty"`
 	RPC                  *JSONRPCServerSettings `json:"rpc,omitempty"`
 	Keys                 []*crypto.Key          `json:"keys,omitempty"`
 	Secret               []byte                 `json:"secret,omitempty"`
@@ -70,7 +70,7 @@ type MeterSettings struct {
 }
 
 type Settings struct {
-	Admin        *AdminSettings        `json:"admin"`
+	Admin        *AdminSettings        `json:"admin,omitempty"`
 	Definitions  *Definitions          `json:"definitions,omitempty"`
 	Storage      *StorageSettings      `json:"storage,omitempty"`
 	Appointments *AppointmentsSettings `json:"appointments,omitempty"`

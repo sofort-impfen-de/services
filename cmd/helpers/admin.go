@@ -18,6 +18,7 @@ package helpers
 
 import (
 	"encoding/json"
+	"fmt"
 	"github.com/kiebitz-oss/services"
 	"github.com/kiebitz-oss/services/crypto"
 	kbForms "github.com/kiebitz-oss/services/forms"
@@ -86,36 +87,193 @@ type Distance struct {
 	Distance float64 `json:"distance"`
 }
 
-func generateKeys(settings *services.Settings) func(c *cli.Context) error {
+func generateMediatorKeys(settings *services.Settings) func(c *cli.Context) error {
 	return func(c *cli.Context) error {
-		env := c.String("env")
-		services.Log.Info(env)
 
-		settings := &services.Settings{
-			Appointments: &services.AppointmentsSettings{},
-			Admin: &services.AdminSettings{
-				Signing: &services.SigningSettings{},
-			},
+		keys := map[string]string{
+			"signing":    "ecdsa",
+			"encryption": "ecdh",
 		}
 
-		adminKeys := []*crypto.Key{}
-		apptKeys := []*crypto.Key{}
+		keyData := map[string]interface{}{}
 
-		for _, name := range []string{"root", "providerData", "token", "queueData"} {
+		for name, keyType := range keys {
 			queueDataKey, err := crypto.GenerateKey()
 
 			if err != nil {
 				services.Log.Fatal(err)
 			}
 
-			settingsKey, err := crypto.AsSettingsKey(queueDataKey, name)
+			webKey, err := crypto.AsWebKey(queueDataKey, keyType)
+
+			if err != nil {
+				services.Log.Fatal(err)
+			}
+
+			keyData[name] = webKey
+
+		}
+
+		for _, name := range []string{"queue", "providerData"} {
+			key := settings.Admin.Signing.Key(name)
+			publicKey, err := crypto.LoadPublicKey(key.PublicKey)
+			if err != nil {
+				services.Log.Fatal(err)
+			}
+
+			privateKey, err := crypto.LoadPrivateKey(key.PrivateKey)
+			if err != nil {
+				services.Log.Fatal(err)
+			}
+
+			privateKey.PublicKey = *publicKey
+
+			webKey, err := crypto.AsWebKey(privateKey, key.Type)
+
+			if err != nil {
+				services.Log.Fatal(err)
+			}
+
+			keyData[name] = webKey
+		}
+
+		jsonData, err := json.MarshalIndent(keyData, "", "  ")
+
+		if err != nil {
+			services.Log.Fatal(err)
+		}
+
+		fmt.Println(string(jsonData))
+
+		return nil
+	}
+}
+
+var queueAreas = []string{"01", "02", "03", "04", "06", "07", "08", "09", "10", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31", "32", "33", "34", "35", "36", "37", "38", "39", "40", "41", "42", "44", "45", "46", "47", "48", "49", "50", "51", "52", "53", "54", "55", "56", "57", "58", "59", "60", "61", "63", "64", "65", "66", "67", "68", "69", "70", "71", "72", "73", "74", "75", "76", "77", "78", "79", "80", "81", "82", "83", "84", "85", "86", "87", "88", "89", "90", "91", "92", "93", "94", "95", "96", "97", "98", "99"}
+
+/*
+queues_filename = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'settings/{env}/queues.json')
+
+def main():
+	key_filename = sys.argv[1]
+	with open(key_filename) as input:
+		key = json.load(input)
+	queues = []
+	for area in areas:
+		queues.append({
+			'encryptedPrivateKey' : key['encryptedPrivateKey'],
+			'publicKey' : key['publicKey'],
+			'type': 'zipArea',
+			'name': area,
+			'id': base64.b64encode(secrets.token_bytes(32)).decode("ascii"),
+			'data': {
+				'zipArea': area,
+			}
+			})
+	for env in ['dev', 'test']:
+		with open(queues_filename.format(env=env), 'w') as output:
+			json.dump({'queues' : queues}, output, indent=2)
+
+if __name__ == '__main__':
+	main()
+*/
+
+type EncryptedPrivateQueueKey struct {
+	IV        []byte `json:"iv"`
+	Data      []byte `json:"data"`
+	PublicKey string `json:"publicKey"`
+}
+
+type QueueData struct {
+	EncryptedPrivateKey *EncryptedPrivateQueueKey `json:"encryptedPrivateKey"`
+	PublicKey           string                    `json:"publicKey"`
+	Type                string                    `json:"type"`
+	Name                string                    `json:"name"`
+	ID                  []byte                    `json:"id"`
+	Data                map[string]interface{}    `json:"data"`
+}
+
+func generateQueues(settings *services.Settings) func(c *cli.Context) error {
+
+	return func(c *cli.Context) error {
+		queueKey := settings.Admin.Signing.Key("queue")
+		ephemeralKey, err := crypto.GenerateKey()
+
+		webKey, err := crypto.AsWebKey(ephemeralKey, "ecdh")
+
+		if err != nil {
+			services.Log.Fatal(err)
+		}
+
+		if err != nil {
+			services.Log.Fatal(err)
+		}
+
+		queuePublicKey, err := crypto.LoadPublicKey(queueKey.PublicKey)
+		if err != nil {
+			services.Log.Fatal(err)
+		}
+
+		sharedKey := crypto.DeriveKey(queuePublicKey, ephemeralKey)
+
+		encryptedData, err := crypto.Encrypt([]byte("this is just a test"), sharedKey)
+
+		if err != nil {
+			services.Log.Fatal(err)
+		}
+
+		queueData := &QueueData{
+			EncryptedPrivateKey: &EncryptedPrivateQueueKey{
+				IV:        encryptedData.IV,
+				Data:      encryptedData.Data,
+				PublicKey: webKey.PublicKey,
+			},
+			PublicKey: webKey.PublicKey,
+			Name:      "test",
+		}
+
+		jsonData, err := json.Marshal(queueData)
+
+		if err != nil {
+			services.Log.Fatal(err)
+		}
+
+		services.Log.Info(string(jsonData))
+
+		return nil
+
+	}
+}
+
+func setupKeys(settings *services.Settings) func(c *cli.Context) error {
+	return func(c *cli.Context) error {
+		env := c.String("env")
+
+		adminKeys := []*crypto.Key{}
+		apptKeys := []*crypto.Key{}
+
+		keys := map[string]string{
+			"root":         "ecdsa",
+			"token":        "ecdsa",
+			"providerData": "ecdh",
+			"queue":        "ecdh",
+		}
+
+		for name, keyType := range keys {
+			queueDataKey, err := crypto.GenerateKey()
+
+			if err != nil {
+				services.Log.Fatal(err)
+			}
+
+			settingsKey, err := crypto.AsSettingsKey(queueDataKey, name, keyType)
 
 			if err != nil {
 				services.Log.Fatal(err)
 			}
 			adminKeys = append(adminKeys, settingsKey)
 
-			keyCopy := &*settingsKey
+			keyCopy := *settingsKey
 
 			if name != "token" {
 				// we remove all private keys except for the 'token' key, which the backend needs
@@ -123,20 +281,43 @@ func generateKeys(settings *services.Settings) func(c *cli.Context) error {
 				keyCopy.PrivateKey = nil
 			}
 
-			apptKeys = append(apptKeys, keyCopy)
+			apptKeys = append(apptKeys, &keyCopy)
 
 		}
 
-		settings.Admin.Signing.Keys = adminKeys
-		settings.Appointments.Keys = apptKeys
+		adminSettings := &services.Settings{
+			Admin: &services.AdminSettings{
+				Signing: &services.SigningSettings{
+					Keys: adminKeys,
+				},
+			},
+		}
 
-		jsonData, err := json.MarshalIndent(settings, "", "  ")
+		apptSettings := &services.Settings{
+			Appointments: &services.AppointmentsSettings{
+				Keys: apptKeys,
+			},
+		}
+
+		apptJson, err := json.MarshalIndent(apptSettings, "", "  ")
 
 		if err != nil {
 			services.Log.Fatal(err)
 		}
 
-		services.Log.Info(string(jsonData))
+		adminJson, err := json.MarshalIndent(adminSettings, "", "  ")
+
+		if err != nil {
+			services.Log.Fatal(err)
+		}
+
+		if err := ioutil.WriteFile(fmt.Sprintf("settings/%s/002_admin.json", env), adminJson, 0644); err != nil {
+			services.Log.Fatal(err)
+		}
+
+		if err := ioutil.WriteFile(fmt.Sprintf("settings/%s/003_appt.json", env), apptJson, 0644); err != nil {
+			services.Log.Fatal(err)
+		}
 
 		return nil
 	}
@@ -630,7 +811,7 @@ func Admin(settings *services.Settings) ([]cli.Command, error) {
 					Usage: "Keys-related command.",
 					Subcommands: []cli.Command{
 						{
-							Name: "generate",
+							Name: "setup",
 							Flags: []cli.Flag{
 								&cli.StringFlag{
 									Name:  "env",
@@ -638,8 +819,14 @@ func Admin(settings *services.Settings) ([]cli.Command, error) {
 									Usage: "environment to generate keys for",
 								},
 							},
-							Usage:  "generate keys for the given environment",
-							Action: generateKeys(settings),
+							Usage:  "set up keys for the given environment",
+							Action: setupKeys(settings),
+						},
+						{
+							Name:   "mediator",
+							Flags:  []cli.Flag{},
+							Usage:  "generate a new set of mediator keys",
+							Action: generateMediatorKeys(settings),
 						},
 					},
 				},
@@ -661,6 +848,12 @@ func Admin(settings *services.Settings) ([]cli.Command, error) {
 					Flags: []cli.Flag{},
 					Usage: "Queues-related command.",
 					Subcommands: []cli.Command{
+						{
+							Name:   "generate",
+							Flags:  []cli.Flag{},
+							Usage:  "generate queues for all relevant zip codes",
+							Action: generateQueues(settings),
+						},
 						{
 							Name:   "upload",
 							Flags:  []cli.Flag{},

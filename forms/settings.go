@@ -271,6 +271,7 @@ var AppointmentsForm = forms.Form{
 		{
 			Name: "secret",
 			Validators: []forms.Validator{
+				forms.IsOptional{},
 				forms.IsBytes{
 					Encoding:  "base64",
 					MinLength: 16,

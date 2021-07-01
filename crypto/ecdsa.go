@@ -50,7 +50,7 @@ type WebKey struct {
 	PrivateKey *JWKPrivateKey `json:"privateKey"`
 }
 
-func AsSettingsKey(key *ecdsa.PrivateKey, name string) (*Key, error) {
+func AsSettingsKey(key *ecdsa.PrivateKey, name, keyType string) (*Key, error) {
 	marshalledPublicKey, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
 	if err != nil {
 		return nil, err
@@ -60,10 +60,20 @@ func AsSettingsKey(key *ecdsa.PrivateKey, name string) (*Key, error) {
 		return nil, err
 	}
 
+	var purposes []string
+
+	switch keyType {
+	case "ecdh":
+		purposes = []string{"deriveKey"}
+	case "ecdsa":
+		purposes = []string{"sign", "verify"}
+	}
+
 	return &Key{
+		Type:       keyType,
 		PublicKey:  marshalledPublicKey,
 		PrivateKey: marshalledPrivateKey,
-		Purposes:   []string{"sign", "verify", "deriveKey"},
+		Purposes:   purposes,
 		Params: map[string]interface{}{
 			"curve": "p-256",
 		},
@@ -73,21 +83,31 @@ func AsSettingsKey(key *ecdsa.PrivateKey, name string) (*Key, error) {
 
 }
 
-func AsWebKey(key *ecdsa.PrivateKey) (*WebKey, error) {
+func AsWebKey(key *ecdsa.PrivateKey, keyType string) (*WebKey, error) {
 	marshalledPublicKey, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
 	if err != nil {
 		return nil, err
 	}
+
+	var ops []string
+
+	switch keyType {
+	case "ecdh":
+		ops = []string{"deriveKey"}
+	case "ecdsa":
+		ops = []string{"sign", "verify"}
+	}
+
 	return &WebKey{
 		PublicKey: base64.StdEncoding.EncodeToString(marshalledPublicKey),
 		PrivateKey: &JWKPrivateKey{
 			Curve:       key.Params().Name,
-			D:           base64.URLEncoding.EncodeToString(key.D.Bytes()),
+			D:           base64.RawURLEncoding.EncodeToString(key.D.Bytes()),
 			Extractable: true,
-			KeyOps:      []string{"sign", "verify", "deriveKey"},
+			KeyOps:      ops,
 			KeyType:     "EC",
-			X:           base64.URLEncoding.EncodeToString(key.X.Bytes()),
-			Y:           base64.URLEncoding.EncodeToString(key.Y.Bytes()),
+			X:           base64.RawURLEncoding.EncodeToString(key.X.Bytes()),
+			Y:           base64.RawURLEncoding.EncodeToString(key.Y.Bytes()),
 		},
 	}, nil
 }
