@@ -23,6 +23,7 @@ import (
 	"github.com/kiebitz-oss/services"
 	"github.com/kiebitz-oss/services/crypto"
 	kbForms "github.com/kiebitz-oss/services/forms"
+	"github.com/kiebitz-oss/services/helpers"
 	"github.com/kiebitz-oss/services/jsonrpc"
 	"github.com/kiprotect/go-helpers/forms"
 	"github.com/urfave/cli"
@@ -286,7 +287,6 @@ func generateQueues(settings *services.Settings) func(c *cli.Context) error {
 
 func setupKeys(settings *services.Settings) func(c *cli.Context) error {
 	return func(c *cli.Context) error {
-		env := c.String("env")
 
 		adminKeys := []*crypto.Key{}
 		apptKeys := []*crypto.Key{}
@@ -350,11 +350,17 @@ func setupKeys(settings *services.Settings) func(c *cli.Context) error {
 			services.Log.Fatal(err)
 		}
 
-		if err := ioutil.WriteFile(fmt.Sprintf("settings/%s/002_admin.json", env), adminJson, 0644); err != nil {
+		settingsPaths := helpers.SettingsPaths()
+
+		if len(settingsPaths) == 0 {
+			services.Log.Fatal("no settings paths defined!")
+		}
+
+		if err := ioutil.WriteFile(fmt.Sprintf("%s/002_admin.json", settingsPaths[0]), adminJson, 0644); err != nil {
 			services.Log.Fatal(err)
 		}
 
-		if err := ioutil.WriteFile(fmt.Sprintf("settings/%s/003_appt.json", env), apptJson, 0644); err != nil {
+		if err := ioutil.WriteFile(fmt.Sprintf("%s/003_appt.json", settingsPaths[0]), apptJson, 0644); err != nil {
 			services.Log.Fatal(err)
 		}
 
@@ -910,14 +916,8 @@ func Admin(settings *services.Settings) ([]cli.Command, error) {
 					Usage: "Keys-related command.",
 					Subcommands: []cli.Command{
 						{
-							Name: "setup",
-							Flags: []cli.Flag{
-								&cli.StringFlag{
-									Name:  "env",
-									Value: "dev",
-									Usage: "environment to generate keys for",
-								},
-							},
+							Name:   "setup",
+							Flags:  []cli.Flag{},
 							Usage:  "set up keys for the given environment",
 							Action: setupKeys(settings),
 						},

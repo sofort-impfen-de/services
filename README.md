@@ -17,6 +17,14 @@ make
 
 Kiebitz needs cryptographic keys and some helper data to function correctly. All of these can be generated using the `kiebitz` command.
 
+First things first: Kiebitz looks for settings in the path given by the `KIEBITZ_SETTINGS` environment variable. For development, settings are in the `settings/dev` subdirectory of the repository. To set up your development environment, simply run
+
+```bash
+source .dev-setup
+```
+
+For the commands below we'll assume that `KIEBITZ_SETTINGS` points to the `settings/dev` directory.
+
 ### Cryptographic Keys
 
 First, we need to generate various cryptographic keys for signing and encryption. To do this, we simply run
@@ -27,7 +35,7 @@ kiebitz admin keys setup
 
 **Warning:** Running this command will overwrite existing key files, potentially rendering all your development data useless, so be careful.
 
-We can change the environment using the `--env` flag, e.g. to generate production keys simply run `kiebitz admin keys setup --env prod`. This will generate two files in `settings/[env]` directory, `002_admin.json` and `003_appt.json`. The former is only for administration purposes and should remain locked away. The latter is for use with the appointments server.
+This will generate two files in the Kiebitz settings directory, `002_admin.json` and `003_appt.json`. The former is only for administration purposes and should remain locked away. The latter is for use with the appointments server.
 
 Now we can then generate mediator keys. To do this, we simply run
 
@@ -40,7 +48,6 @@ This will create a JSON data structure with all necessary keys for the mediator.
 For the next steps of the setup process we'll need a running backend, so let's start it via
 
 ```bash
-source .dev-setup
 kiebitz --level debug run all
 ```
 
@@ -121,7 +128,6 @@ to generate these certificates, and then enable them by commenting out the `tls`
 To run the development services is easy:
 
 ```bash
-source .dev-setup
 # run the appointments service
 kiebitz run appointments
 # ...or run the storage service
