@@ -5,6 +5,12 @@ This repository contains Kiebitz's backend services:
 * A **storage** service that stores encrypted user & operator settings and temporary data.
 * An **appointments** service that stores encrypted appointment data.
 
+## Dependencies
+
+The Kiebitz backend services are written in Golang. Please install a recent version, preferably >=1.16.
+
+By default, Kiebitz uses a Redis database to store data. Please make sure a Redis server is available. You can change the connection details in the `settings/dev/001_default.yml` settings file. The metering services (for statistics) also uses a Redis database by default and can be configured just like the main database. In addition, to generate TLS certificates (which is not always necessary) Kiebitz relies on the `openssl` CLI.
+
 ## Installation
 
 To build and install all services into your `GOPATH`, simply run
