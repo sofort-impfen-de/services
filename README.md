@@ -17,7 +17,7 @@ make
 
 Kiebitz needs cryptographic keys and some helper data to function correctly. All of these can be generated using the `kiebitz` command.
 
-First things first: Kiebitz looks for settings in the path given by the `KIEBITZ_SETTINGS` environment variable. For development, settings are in the `settings/dev` subdirectory of the repository. To set up your development environment, simply run
+First things first: Kiebitz looks for settings in the path given by the `KIEBITZ_SETTINGS` environment variable. For development, settings are in the `settings/dev` subdirectory of the repository. To set up our development environment, we simply run
 
 ```bash
 source .dev-setup
