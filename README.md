@@ -64,16 +64,6 @@ kiebitz admin queues upload data/secret-queue-keys.json
 
 That's it! Now we should be able to go to the `/mediator` URL in the frontend, load our mediator key file and verify providers. Providers should be able to sign up, upload their data for verification and get tokens. Users should also be able to sign up and receive invitations.
 
-### TLS Certificates
-
-If we want to run Kiebitz using a self-signed TLS certificate, we simply run
-
-```bash
-make certs
-```
-
-to generate these certificates, and then enable them by commenting out the `tls` section in the settings.
-
 ### ZIP Code Data
 
 ZIP code data helps Kiebitz to estimate distances between zip code areas. There are two files `data/distances.json` and `data/distances-areas.json` that need to be uploaded. We can do this via
@@ -115,6 +105,16 @@ kiebitz admin codes generate --actor provider -n 10000 > data/secret-user-codes.
 ```
 
 Codes are just random 16 byte values, and the `actor` parameter just tells the backend for which actor the codes should be used.
+
+### TLS Certificates
+
+Finally, if we want to run Kiebitz using a self-signed TLS certificate, we simply run
+
+```bash
+make certs
+```
+
+to generate these certificates, and then enable them by commenting out the `tls` section in the settings.
 
 ## Running
 
