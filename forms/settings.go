@@ -155,7 +155,7 @@ var ECDSAParamsForm = forms.Form{
 		{
 			Name: "curve",
 			Validators: []forms.Validator{
-				forms.IsIn{Choices: []interface{}{"p-256"}}, // we only support P-256
+				forms.IsIn{Choices: []interface{}{"p-256", "P-256"}}, // we only support P-256
 			},
 		},
 	},

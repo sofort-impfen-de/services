@@ -18,14 +18,79 @@ package crypto
 
 import (
 	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
+	"encoding/base64"
 	"fmt"
 	"math/big"
 )
 
 // https://thanethomson.com/2018/11/30/validating-ecdsa-signatures-golang/
+
+func GenerateKey() (*ecdsa.PrivateKey, error) {
+	return ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+}
+
+type JWKPrivateKey struct {
+	Curve       string   `json:"crv"`
+	D           string   `json:"d"`
+	Extractable bool     `json:"ext"`
+	KeyOps      []string `json:"key_ops"`
+	KeyType     string   `json:"kty"`
+	X           string   `json:"x"`
+	Y           string   `json:"y"`
+}
+
+type WebKey struct {
+	// PKIX ASN.1 DER format
+	PublicKey string `json:"publicKey"`
+	// JWK format (as Firefox can't parse PKCS8...)
+	PrivateKey *JWKPrivateKey `json:"privateKey"`
+}
+
+func AsSettingsKey(key *ecdsa.PrivateKey, name string) (*Key, error) {
+	marshalledPublicKey, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
+	if err != nil {
+		return nil, err
+	}
+	marshalledPrivateKey, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Key{
+		PublicKey:  marshalledPublicKey,
+		PrivateKey: marshalledPrivateKey,
+		Purposes:   []string{"sign", "verify", "deriveKey"},
+		Params: map[string]interface{}{
+			"curve": "p-256",
+		},
+		Name:   name,
+		Format: "spki-pkcs8",
+	}, nil
+
+}
+
+func AsWebKey(key *ecdsa.PrivateKey) (*WebKey, error) {
+	marshalledPublicKey, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
+	if err != nil {
+		return nil, err
+	}
+	return &WebKey{
+		PublicKey: base64.StdEncoding.EncodeToString(marshalledPublicKey),
+		PrivateKey: &JWKPrivateKey{
+			Curve:       key.Params().Name,
+			D:           base64.URLEncoding.EncodeToString(key.D.Bytes()),
+			Extractable: true,
+			KeyOps:      []string{"sign", "verify", "deriveKey"},
+			KeyType:     "EC",
+			X:           base64.URLEncoding.EncodeToString(key.X.Bytes()),
+			Y:           base64.URLEncoding.EncodeToString(key.Y.Bytes()),
+		},
+	}, nil
+}
 
 func LoadPublicKey(publicKey []byte) (*ecdsa.PublicKey, error) {
 	pub, err := x509.ParsePKIXPublicKey(publicKey)

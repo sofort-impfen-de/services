@@ -4,14 +4,14 @@ meter:
   type: redis
   settings:
     addresses: ["localhost:6379"]
-    database: 1
+    database: 3
     password: ""
 database:
   name: db
   type: redis
   settings:
     addresses: ["localhost:6379"]
-    database: 0
+    database: 2
     password: ""
 storage:
   settings_ttl_days: 60

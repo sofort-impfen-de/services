@@ -604,7 +604,7 @@ func (c *Appointments) addMediatorPublicKeys(context *jsonrpc.Context, params *A
 		services.Log.Error("root key missing")
 		return context.InternalError()
 	}
-	if ok, err := rootKey.Verify(&services.SignedData{
+	if ok, err := rootKey.Verify(&crypto.SignedData{
 		Data:      []byte(params.JSON),
 		Signature: params.Signature,
 	}); !ok {
@@ -730,7 +730,7 @@ func (c *Appointments) addCodes(context *jsonrpc.Context, params *AddCodesParams
 		services.Log.Error("root key missing")
 		return context.InternalError()
 	}
-	if ok, err := rootKey.Verify(&services.SignedData{
+	if ok, err := rootKey.Verify(&crypto.SignedData{
 		Data:      []byte(params.JSON),
 		Signature: params.Signature,
 	}); !ok {
@@ -903,7 +903,7 @@ func (c *Appointments) uploadDistances(context *jsonrpc.Context, params *UploadD
 		services.Log.Error("root key missing")
 		return context.InternalError()
 	}
-	if ok, err := rootKey.Verify(&services.SignedData{
+	if ok, err := rootKey.Verify(&crypto.SignedData{
 		Data:      []byte(params.JSON),
 		Signature: params.Signature,
 	}); !ok {
@@ -1018,7 +1018,7 @@ func (c *Appointments) setQueues(context *jsonrpc.Context, params *SetQueuesPara
 		services.Log.Error("root key missing")
 		return context.InternalError()
 	}
-	if ok, err := rootKey.Verify(&services.SignedData{
+	if ok, err := rootKey.Verify(&crypto.SignedData{
 		Data:      []byte(params.JSON),
 		Signature: params.Signature,
 	}); !ok {
@@ -2344,14 +2344,14 @@ func (c *Appointments) getToken(context *jsonrpc.Context, params *GetTokenParams
 	activeTokensSet := transaction.SortedSet("tokens", []byte("active"))
 
 	var queueToken *QueueToken
-	var signedData *services.SignedStringData
+	var signedData *crypto.SignedStringData
 
 	// this is an update call
 	if params.SignedTokenData != nil {
 
 		services.Log.Debug("Updating token...")
 
-		signedData = &services.SignedStringData{
+		signedData = &crypto.SignedStringData{
 			Data:      params.SignedTokenData.JSON,
 			Signature: params.SignedTokenData.Signature,
 		}

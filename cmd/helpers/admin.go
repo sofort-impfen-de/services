@@ -19,6 +19,7 @@ package helpers
 import (
 	"encoding/json"
 	"github.com/kiebitz-oss/services"
+	"github.com/kiebitz-oss/services/crypto"
 	kbForms "github.com/kiebitz-oss/services/forms"
 	"github.com/kiebitz-oss/services/jsonrpc"
 	"github.com/kiprotect/go-helpers/forms"
@@ -83,6 +84,62 @@ type Distance struct {
 	From     string  `json:"from"`
 	To       string  `json:"to"`
 	Distance float64 `json:"distance"`
+}
+
+func generateKeys(settings *services.Settings) func(c *cli.Context) error {
+	return func(c *cli.Context) error {
+		env := c.String("env")
+		services.Log.Info(env)
+
+		settings := &services.Settings{
+			Appointments: &services.AppointmentsSettings{},
+			Admin: &services.AdminSettings{
+				Signing: &services.SigningSettings{},
+			},
+		}
+
+		adminKeys := []*crypto.Key{}
+		apptKeys := []*crypto.Key{}
+
+		for _, name := range []string{"root", "providerData", "token", "queueData"} {
+			queueDataKey, err := crypto.GenerateKey()
+
+			if err != nil {
+				services.Log.Fatal(err)
+			}
+
+			settingsKey, err := crypto.AsSettingsKey(queueDataKey, name)
+
+			if err != nil {
+				services.Log.Fatal(err)
+			}
+			adminKeys = append(adminKeys, settingsKey)
+
+			keyCopy := &*settingsKey
+
+			if name != "token" {
+				// we remove all private keys except for the 'token' key, which the backend needs
+				// to sign tokens...
+				keyCopy.PrivateKey = nil
+			}
+
+			apptKeys = append(apptKeys, keyCopy)
+
+		}
+
+		settings.Admin.Signing.Keys = adminKeys
+		settings.Appointments.Keys = apptKeys
+
+		jsonData, err := json.MarshalIndent(settings, "", "  ")
+
+		if err != nil {
+			services.Log.Fatal(err)
+		}
+
+		services.Log.Info(string(jsonData))
+
+		return nil
+	}
 }
 
 func uploadDistances(settings *services.Settings) func(c *cli.Context) error {
@@ -564,6 +621,25 @@ func Admin(settings *services.Settings) ([]cli.Command, error) {
 							Flags:  []cli.Flag{},
 							Usage:  "upload codes from a file to the backend",
 							Action: uploadCodes(settings),
+						},
+					},
+				},
+				{
+					Name:  "keys",
+					Flags: []cli.Flag{},
+					Usage: "Keys-related command.",
+					Subcommands: []cli.Command{
+						{
+							Name: "generate",
+							Flags: []cli.Flag{
+								&cli.StringFlag{
+									Name:  "env",
+									Value: "dev",
+									Usage: "environment to generate keys for",
+								},
+							},
+							Usage:  "generate keys for the given environment",
+							Action: generateKeys(settings),
 						},
 					},
 				},
