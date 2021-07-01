@@ -88,6 +88,8 @@ func sendMails(mailSettings *services.MailSettings) {
 	to := []string{"recipient@example.net"}
 	msg := "From: " + mailSettings.Sender + "\n" +
 		"To: recipient@example.net \n" +
+		"MIME-version: 1.0;\n" +
+		"Content-Type: text/html;charset=\"UTF-8\";\n" +
 		"Subject: " + mailSettings.MailSubject + "\n\n" +
 		mailSettings.MailTemplate
 	err := smtp.SendMail(
