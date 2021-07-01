@@ -332,9 +332,16 @@ func setupKeys(settings *services.Settings) func(c *cli.Context) error {
 			},
 		}
 
+		secret, err := crypto.RandomBytes(32)
+
+		if err != nil {
+			services.Log.Fatal(err)
+		}
+
 		apptSettings := &services.Settings{
 			Appointments: &services.AppointmentsSettings{
 				Keys: apptKeys,
+				Secret: secret,
 			},
 		}
 
