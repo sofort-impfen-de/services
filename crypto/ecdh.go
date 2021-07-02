@@ -26,7 +26,8 @@ func DeriveKey(publicKey *ecdsa.PublicKey, privateKey *ecdsa.PrivateKey) []byte 
 	a, _ := publicKey.Curve.ScalarMult(publicKey.X, publicKey.Y, privateKey.D.Bytes())
 	ab := a.Bytes()
 	for len(ab) < 32 {
-		ab = append(ab, byte(0))
+		// we pad the number with zeros, most significant bits first!
+		ab = append([]byte{byte(0)}, ab...)
 	}
 	return ab
 }
