@@ -35,6 +35,7 @@ appointments:
   user_codes_enabled: false
   provider_codes_enabled: false
   keys: []
+  secret: MTIzNDU2Nzg5MTIzNDU2NDg5Cg==
   rpc:
     bind_address: localhost:8888
     cors:

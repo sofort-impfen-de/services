@@ -401,6 +401,15 @@ var SettingsForm = forms.Form{
 			},
 		},
 		{
+			Name: "appointments",
+			Validators: []forms.Validator{
+				forms.IsOptional{},
+				forms.IsStringMap{
+					Form: &AppointmentsForm,
+				},
+			},
+		},
+		{
 			Name: "notification",
 			Validators: []forms.Validator{
 				forms.IsOptional{},
