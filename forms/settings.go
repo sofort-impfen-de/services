@@ -208,6 +208,16 @@ var NotificationForm = forms.Form{
 			},
 		},
 		{
+			Name: "secret",
+			Validators: []forms.Validator{
+				forms.IsBytes{
+					Encoding:  "base64",
+					MinLength: 16,
+					MaxLength: 64,
+				},
+			},
+		},
+		{
 			Name: "mail",
 			Validators: []forms.Validator{
 				forms.IsStringMap{

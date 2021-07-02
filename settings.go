@@ -39,8 +39,9 @@ type AppointmentsSettings struct {
 }
 
 type NotificationSettings struct {
-	RPC  *JSONRPCServerSettings `json:"rpc"`
-	Mail *MailSettings          `json:"mail"`
+	RPC    *JSONRPCServerSettings `json:"rpc"`
+	Mail   *MailSettings          `json:"mail"`
+	Secret []byte                 `json:"secret"`
 }
 
 func (a *AppointmentsSettings) Key(name string) *Key {
