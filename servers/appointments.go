@@ -2642,6 +2642,16 @@ var CapacityForm = forms.Form{
 			},
 		},
 		{
+			Name: "bookings",
+			Validators: []forms.Validator{
+				forms.IsOptional{Default: 0},
+				forms.IsInteger{
+					HasMin: true,
+					Min:    0,
+				},
+			},
+		},
+		{
 			Name: "tokens",
 			Validators: []forms.Validator{
 				forms.IsOptional{Default: 0},
@@ -2677,6 +2687,7 @@ type Capacity struct {
 	Tokens     int64                  `json:"tokens"`
 	Open       int64                  `json:"open"`
 	Booked     int64                  `json:"booked"`
+	Bookings   int64                  `json:"bookings"`
 	Properties map[string]interface{} `json:"properties"`
 }
 
@@ -2727,13 +2738,14 @@ func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueue
 		return context.InternalError()
 	}
 
-	var totalCapacity, totalTokens, totalOpen, totalOpenTokens, totalBooked int64
+	var totalCapacity, totalTokens, totalOpen, totalOpenTokens, totalBooked, totalBookings int64
 	// to do: better balancing and check queue data
 	for _, capacity := range params.Data.Capacities {
 		totalCapacity += capacity.N
 		totalOpen += capacity.Open
 		totalOpenTokens += capacity.Tokens
 		totalBooked += capacity.Booked
+		totalBookings += capacity.Bookings
 		tokens := []*QueueToken{}
 		for len(tokens) < int(capacity.N) {
 			noMoreTokens := true
@@ -2872,6 +2884,10 @@ func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueue
 			}
 			// we add the maximum of the booked appointments
 			if err := c.meter.AddMax("queues", "booked", hexUID, data, tw, int64(math.Min(1000, float64(totalBooked)))); err != nil {
+				return err
+			}
+			// we add the maximum of the booked appointments
+			if err := c.meter.Add("queues", "bookings", data, tw, int64(math.Min(1000, float64(totalBookings)))); err != nil {
 				return err
 			}
 			// we add the maximum of the difference between capacity and available tokens

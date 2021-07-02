@@ -1,1 +1,3 @@
 *.json
+!distances.json
+!distances-areas.json

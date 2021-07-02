@@ -20,6 +20,26 @@ To run the development server(s) you also need TLS certificates. You can generat
 make certs
 ```
 
+## Basic Setup
+
+Kiebitz needs cryptographic keys and some helper data to function correctly.
+
+### ZIP Code Data
+
+ZIP code data helps Kiebitz to estimate distances between zip code areas. There are two files `data/distances.json` and `data/distances-areas.json` that need to be uploaded. You can do this via
+
+```bash
+kiebitz admin distances upload data/distances.json
+kiebitz admin distances upload data/distances-areas.json
+```
+
+To generate the distances, you can use the `make_distances.py` and `make_area_distances.py` scripts from the `.scripts` folder (normally this is not necessary):
+
+```bash
+python3 .scripts/make_distances.py
+python3 .scripts/make_area_distances.py
+```
+
 ## Running
 
 Start redis:
