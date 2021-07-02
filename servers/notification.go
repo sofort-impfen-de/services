@@ -40,8 +40,23 @@ func (c *Notification) Stop() error {
 type sendNotificationParams struct {
 }
 
+type removeMailParams struct {
+	Mail string `json:"mail"`
+}
+
 var SendNotificationsForm = forms.Form{
 	Fields: []forms.Field{},
+}
+
+var RemoveMailForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "mail",
+			Validators: []forms.Validator{
+				forms.IsString{},
+			},
+		},
+	},
 }
 
 func MakeNotification(settings *services.Settings) (*Notification, error) {
@@ -54,6 +69,10 @@ func MakeNotification(settings *services.Settings) (*Notification, error) {
 		"sendNotifications": {
 			Form:    &SendNotificationsForm,
 			Handler: Notification.sendNotifications,
+		},
+		"removeMail": {
+			Form:    &RemoveMailForm,
+			Handler: Notification.removeMail,
 		},
 	}
 
@@ -75,6 +94,11 @@ func MakeNotification(settings *services.Settings) (*Notification, error) {
 func (c *Notification) sendNotifications(context *jsonrpc.Context, params *sendNotificationParams) *jsonrpc.Response {
 
 	sendMails(c.settings.Mail)
+
+	return context.Acknowledge()
+}
+
+func (c *Notification) removeMail(context *jsonrpc.Context, params *removeMailParams) *jsonrpc.Response {
 
 	return context.Acknowledge()
 }
