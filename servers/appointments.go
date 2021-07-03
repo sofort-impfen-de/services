@@ -604,7 +604,7 @@ func (c *Appointments) addMediatorPublicKeys(context *jsonrpc.Context, params *A
 		services.Log.Error("root key missing")
 		return context.InternalError()
 	}
-	if ok, err := rootKey.Verify(&services.SignedData{
+	if ok, err := rootKey.Verify(&crypto.SignedData{
 		Data:      []byte(params.JSON),
 		Signature: params.Signature,
 	}); !ok {
@@ -730,7 +730,7 @@ func (c *Appointments) addCodes(context *jsonrpc.Context, params *AddCodesParams
 		services.Log.Error("root key missing")
 		return context.InternalError()
 	}
-	if ok, err := rootKey.Verify(&services.SignedData{
+	if ok, err := rootKey.Verify(&crypto.SignedData{
 		Data:      []byte(params.JSON),
 		Signature: params.Signature,
 	}); !ok {
@@ -903,7 +903,7 @@ func (c *Appointments) uploadDistances(context *jsonrpc.Context, params *UploadD
 		services.Log.Error("root key missing")
 		return context.InternalError()
 	}
-	if ok, err := rootKey.Verify(&services.SignedData{
+	if ok, err := rootKey.Verify(&crypto.SignedData{
 		Data:      []byte(params.JSON),
 		Signature: params.Signature,
 	}); !ok {
@@ -1018,7 +1018,7 @@ func (c *Appointments) setQueues(context *jsonrpc.Context, params *SetQueuesPara
 		services.Log.Error("root key missing")
 		return context.InternalError()
 	}
-	if ok, err := rootKey.Verify(&services.SignedData{
+	if ok, err := rootKey.Verify(&crypto.SignedData{
 		Data:      []byte(params.JSON),
 		Signature: params.Signature,
 	}); !ok {
@@ -1275,7 +1275,7 @@ func (c *Appointments) getKeysData() (*Keys, error) {
 			Providers: providerKeys,
 			Mediators: mediatorKeys,
 		},
-		ProviderData: c.settings.Key("providerData").PublicKey,
+		ProviderData: c.settings.Key("provider").PublicKey,
 		RootKey:      c.settings.Key("root").PublicKey,
 		TokenKey:     c.settings.Key("token").PublicKey,
 	}, nil
@@ -2331,6 +2331,7 @@ func (c *Appointments) getToken(context *jsonrpc.Context, params *GetTokenParams
 	defer finalize()
 
 	codes := c.db.Set("codes", []byte("user"))
+	codeScores := c.db.SortedSet("codeScores", []byte("user"))
 
 	tokenKey := c.settings.Key("token")
 	if tokenKey == nil {
@@ -2344,14 +2345,14 @@ func (c *Appointments) getToken(context *jsonrpc.Context, params *GetTokenParams
 	activeTokensSet := transaction.SortedSet("tokens", []byte("active"))
 
 	var queueToken *QueueToken
-	var signedData *services.SignedStringData
+	var signedData *crypto.SignedStringData
 
 	// this is an update call
 	if params.SignedTokenData != nil {
 
 		services.Log.Debug("Updating token...")
 
-		signedData = &services.SignedStringData{
+		signedData = &crypto.SignedStringData{
 			Data:      params.SignedTokenData.JSON,
 			Signature: params.SignedTokenData.Signature,
 		}
@@ -2498,7 +2499,20 @@ func (c *Appointments) getToken(context *jsonrpc.Context, params *GetTokenParams
 	if params.SignedTokenData == nil {
 		// if this is a new token we delete the user code
 		if c.settings.UserCodesEnabled {
-			if err := codes.Del(params.Code); err != nil {
+			score, err := codeScores.Score(params.Code)
+			if err != nil && err != databases.NotFound {
+				services.Log.Error(err)
+				return context.InternalError()
+			}
+
+			score += 1
+
+			if score > c.settings.UserCodesReuseLimit {
+				if err := codes.Del(params.Code); err != nil {
+					services.Log.Error(err)
+					return context.InternalError()
+				}
+			} else if err := codeScores.Add(params.Code, score); err != nil {
 				services.Log.Error(err)
 				return context.InternalError()
 			}
@@ -3045,6 +3059,7 @@ func (c *Appointments) storeProviderData(context *jsonrpc.Context, params *Store
 	verifiedProviderData := transaction.Map("providerData", []byte("verified"))
 	providerData := transaction.Map("providerData", []byte("unverified"))
 	codes := transaction.Set("codes", []byte("provider"))
+	codeScores := c.db.SortedSet("codeScores", []byte("provider"))
 
 	existingData := false
 	if result, err := verifiedProviderData.Get(params.Data.ID); err != nil {
@@ -3102,7 +3117,20 @@ func (c *Appointments) storeProviderData(context *jsonrpc.Context, params *Store
 
 	// we delete the provider code
 	if c.settings.ProviderCodesEnabled {
-		if err := codes.Del(params.Data.Code); err != nil {
+		score, err := codeScores.Score(params.Data.Code)
+		if err != nil && err != databases.NotFound {
+			services.Log.Error(err)
+			return context.InternalError()
+		}
+
+		score += 1
+
+		if score > c.settings.ProviderCodesReuseLimit {
+			if err := codes.Del(params.Data.Code); err != nil {
+				services.Log.Error(err)
+				return context.InternalError()
+			}
+		} else if err := codeScores.Add(params.Data.Code, score); err != nil {
 			services.Log.Error(err)
 			return context.InternalError()
 		}

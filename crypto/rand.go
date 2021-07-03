@@ -14,24 +14,22 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-package servers
+package crypto
 
 import (
-	"encoding/base64"
+	"crypto/rand"
+	"fmt"
 )
 
-// in principle JSON will encode binary data as base64, but we do the conversion
-// explicitly just to avoid any potential inconsistencies that might arise in the future...
-func Encode(data []byte) string {
-	return base64.StdEncoding.EncodeToString(data)
-}
-
-// in principle JSON will encode binary data as base64, but we do the conversion
-// explicitly just to avoid any potential inconsistencies that might arise in the future...
-func EncodeSlice(data [][]byte) []string {
-	strings := make([]string, len(data))
-	for i, d := range data {
-		strings[i] = base64.StdEncoding.EncodeToString(d)
+func RandomBytes(n int) ([]byte, error) {
+	b := make([]byte, n)
+	nr, err := rand.Read(b)
+	if err != nil {
+		return nil, err
 	}
-	return strings
+	if nr != n {
+		return nil, fmt.Errorf("not enough bytes read")
+	}
+
+	return b, nil
 }
