@@ -1270,12 +1270,19 @@ func (c *Appointments) getKeysData() (*Keys, error) {
 		return nil, err
 	}
 
+	providerDataKey := c.settings.Key("provider")
+
+	// to do: remove once the settings are updated
+	if providerDataKey == nil {
+		providerDataKey = c.settings.Key("providerData")
+	}
+
 	return &Keys{
 		Lists: &KeyLists{
 			Providers: providerKeys,
 			Mediators: mediatorKeys,
 		},
-		ProviderData: c.settings.Key("provider").PublicKey,
+		ProviderData: providerDataKey.PublicKey,
 		RootKey:      c.settings.Key("root").PublicKey,
 		TokenKey:     c.settings.Key("token").PublicKey,
 	}, nil
