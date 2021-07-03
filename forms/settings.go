@@ -269,6 +269,30 @@ var AppointmentsForm = forms.Form{
 			},
 		},
 		{
+			Name: "user_codes_reuse_limit",
+			Validators: []forms.Validator{
+				forms.IsOptional{Default: 0},
+				forms.IsInteger{
+					HasMin: true,
+					Min: 0,
+					HasMax: true,
+					Max: 1000,
+				},
+			},
+		},
+		{
+			Name: "provider_codes_reuse_limit",
+			Validators: []forms.Validator{
+				forms.IsOptional{Default: 0},
+				forms.IsInteger{
+					HasMin: true,
+					Min: 0,
+					HasMax: true,
+					Max: 1000,
+				},
+			},
+		},
+		{
 			Name: "secret",
 			Validators: []forms.Validator{
 				forms.IsOptional{},

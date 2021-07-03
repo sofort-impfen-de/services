@@ -2331,6 +2331,7 @@ func (c *Appointments) getToken(context *jsonrpc.Context, params *GetTokenParams
 	defer finalize()
 
 	codes := c.db.Set("codes", []byte("user"))
+	codeScores := c.db.SortedSet("codeScores", []byte("user"))
 
 	tokenKey := c.settings.Key("token")
 	if tokenKey == nil {
@@ -2498,7 +2499,20 @@ func (c *Appointments) getToken(context *jsonrpc.Context, params *GetTokenParams
 	if params.SignedTokenData == nil {
 		// if this is a new token we delete the user code
 		if c.settings.UserCodesEnabled {
-			if err := codes.Del(params.Code); err != nil {
+			score, err := codeScores.Score(params.Code)
+			if err != nil && err != databases.NotFound {
+				services.Log.Error(err)
+				return context.InternalError()
+			}
+
+			score += 1
+
+			if score > c.settings.UserCodesReuseLimit {
+				if err := codes.Del(params.Code); err != nil {
+					services.Log.Error(err)
+					return context.InternalError()
+				}
+			} else if err := codeScores.Add(params.Code, score); err != nil {
 				services.Log.Error(err)
 				return context.InternalError()
 			}
@@ -3029,6 +3043,7 @@ func (c *Appointments) storeProviderData(context *jsonrpc.Context, params *Store
 	verifiedProviderData := transaction.Map("providerData", []byte("verified"))
 	providerData := transaction.Map("providerData", []byte("unverified"))
 	codes := transaction.Set("codes", []byte("provider"))
+	codeScores := c.db.SortedSet("codeScores", []byte("provider"))
 
 	existingData := false
 	if result, err := verifiedProviderData.Get(params.Data.ID); err != nil {
@@ -3086,7 +3101,20 @@ func (c *Appointments) storeProviderData(context *jsonrpc.Context, params *Store
 
 	// we delete the provider code
 	if c.settings.ProviderCodesEnabled {
-		if err := codes.Del(params.Data.Code); err != nil {
+		score, err := codeScores.Score(params.Data.Code)
+		if err != nil && err != databases.NotFound {
+			services.Log.Error(err)
+			return context.InternalError()
+		}
+
+		score += 1
+
+		if score > c.settings.ProviderCodesReuseLimit {
+			if err := codes.Del(params.Data.Code); err != nil {
+				services.Log.Error(err)
+				return context.InternalError()
+			}
+		} else if err := codeScores.Add(params.Data.Code, score); err != nil {
 			services.Log.Error(err)
 			return context.InternalError()
 		}

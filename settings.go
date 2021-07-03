@@ -36,6 +36,8 @@ type AppointmentsSettings struct {
 	Secret               []byte                 `json:"secret,omitempty"`
 	ProviderCodesEnabled bool                   `json:"provider_codes_enabled,omitempty"`
 	UserCodesEnabled     bool                   `json:"user_codes_enabled,omitempty"`
+	UserCodesReuseLimit  int64                  `json:"user_codes_reuse_limit"`
+	ProviderCodesReuseLimit int64               `json:"provider_codes_reuse_limit"`
 }
 
 func (a *AppointmentsSettings) Key(name string) *crypto.Key {
