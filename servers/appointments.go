@@ -89,6 +89,26 @@ func MakeAppointments(settings *services.Settings) (*Appointments, error) {
 			Form:    &GetKeysForm,
 			Handler: Appointments.getKeys,
 		},
+		"getAppointmentsByArea": {
+			Form:    &GetAppointmentsByAreaForm,
+			Handler: Appointments.getAppointmentsByArea,
+		},
+		"getProviderAppointments": {
+			Form:    &GetProviderAppointmentsForm,
+			Handler: Appointments.getProviderAppointments,
+		},
+		"publishAppointments": {
+			Form:    &PublishAppointmentsForm,
+			Handler: Appointments.publishAppointments,
+		},
+		"bookSlot": {
+			Form:    &BookSlotForm,
+			Handler: Appointments.bookSlot,
+		},
+		"cancelSlot": {
+			Form:    &CancelSlotForm,
+			Handler: Appointments.cancelSlot,
+		},
 		"deleteData": {
 			Form:    &DeleteDataForm,
 			Handler: Appointments.deleteData,
@@ -1982,7 +2002,7 @@ func (c *Appointments) verifyGrant(context *jsonrpc.Context, transaction service
 			return context.InternalError()
 		}
 
-		signedData := &services.SignedStringData{
+		signedData := &crypto.SignedStringData{
 			Data:      grant.Context.SignedTokenData.JSON,
 			Signature: grant.Context.SignedTokenData.Signature,
 		}
@@ -2805,6 +2825,344 @@ var tws = []services.TimeWindowFunc{
 	services.Day,
 	services.Week,
 	services.Month,
+}
+
+var GetAppointmentsByAreaForm = forms.Form{
+	Fields: []forms.Field{},
+}
+
+type GetAppointmentsByAreaParams struct {
+	ZipArea string `json:"zipArea"`
+	Radius  int64  `json:"radius"`
+}
+
+func (c *Appointments) getAppointmentsByArea(context *jsonrpc.Context, params *GetAppointmentsByAreaParams) *jsonrpc.Response {
+	return context.Acknowledge()
+}
+
+var GetProviderAppointmentsForm = forms.Form{
+	Fields: []forms.Field{},
+}
+
+type GetProviderAppointmentsParams struct {
+	ProviderID []byte `json:"providerID"`
+}
+
+func (c *Appointments) getProviderAppointments(context *jsonrpc.Context, params *GetProviderAppointmentsParams) *jsonrpc.Response {
+	return context.Acknowledge()
+}
+
+var PublishAppointmentsForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "data",
+			Validators: []forms.Validator{
+				forms.IsString{},
+				JSON{
+					Key: "json",
+				},
+				forms.IsStringMap{
+					Form: &PublishAppointmentsDataForm,
+				},
+			},
+		},
+		{
+			Name: "signature",
+			Validators: []forms.Validator{
+				forms.IsBytes{
+					Encoding:  "base64",
+					MaxLength: 1000,
+					MinLength: 50,
+				},
+			},
+		},
+		{
+			Name: "publicKey",
+			Validators: []forms.Validator{
+				forms.IsOptional{},
+				forms.IsBytes{
+					Encoding:  "base64",
+					MaxLength: 1000,
+					MinLength: 50,
+				},
+			},
+		},
+	},
+}
+
+var PublishAppointmentsDataForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "appointments",
+			Validators: []forms.Validator{
+				forms.IsList{
+					Validators: []forms.Validator{
+						forms.IsStringMap{
+							Form: &AppointmentForm,
+						},
+					},
+				},
+			},
+		},
+	},
+}
+
+var AppointmentForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "timestamp",
+			Validators: []forms.Validator{
+				forms.IsTime{Format: "rfc3339"},
+			},
+		},
+		{
+			Name: "vaccine",
+			Validators: []forms.Validator{
+				forms.IsString{},
+				forms.IsIn{
+					Choices: []interface{}{"biontech", "moderna", "astrazeneca", "johnson-johnson"},
+				},
+			},
+		},
+		{
+			Name: "publicKey",
+			Validators: []forms.Validator{
+				forms.IsOptional{},
+				forms.IsBytes{
+					Encoding:  "base64",
+					MaxLength: 1000,
+					MinLength: 50,
+				},
+			},
+		},
+		{
+			Name: "id",
+			Validators: []forms.Validator{
+				ID,
+			},
+		},
+		{
+			Name: "slots",
+			Validators: []forms.Validator{
+				forms.IsStringMap{
+					Form: &SlotForm,
+				},
+			},
+		},
+	},
+}
+
+var SlotForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "id",
+			Validators: []forms.Validator{
+				ID,
+			},
+		},
+	},
+}
+
+type PublishAppointmentsParams struct {
+	JSON      string                   `json:"json"`
+	Data      *PublishAppointmentsData `json:"data"`
+	Signature []byte                   `json:"signature"`
+	PublicKey []byte                   `json:"publicKey"`
+}
+
+type PublishAppointmentsData struct {
+	Appointments []*Appointment `json:"appointments"`
+}
+
+type Appointment struct {
+	Timestamp time.Time `json:"timestamp"`
+	Duration  int64     `json:"duration"`
+	Vaccine   string    `json:"vaccine"`
+	Slots     []*Slot   `json:"slots"`
+	ID        []byte    `json:"id"`
+	PublicKey []byte    `json:"publicKey"`
+}
+
+type Slot struct {
+	ID []byte `json:"id"`
+}
+
+var BookSlotForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "data",
+			Validators: []forms.Validator{
+				forms.IsString{},
+				JSON{
+					Key: "json",
+				},
+				forms.IsStringMap{
+					Form: &BookSlotDataForm,
+				},
+			},
+		},
+		{
+			Name: "signature",
+			Validators: []forms.Validator{
+				forms.IsBytes{
+					Encoding:  "base64",
+					MaxLength: 1000,
+					MinLength: 50,
+				},
+			},
+		},
+		{
+			Name: "publicKey",
+			Validators: []forms.Validator{
+				forms.IsOptional{},
+				forms.IsBytes{
+					Encoding:  "base64",
+					MaxLength: 1000,
+					MinLength: 50,
+				},
+			},
+		},
+	},
+}
+
+var BookSlotDataForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "id",
+			Validators: []forms.Validator{
+				ID,
+			},
+		},
+		{
+			Name: "signedTokenData",
+			Validators: []forms.Validator{
+				forms.IsOptional{},
+				forms.IsStringMap{
+					Form: &SignedTokenDataForm,
+				},
+			},
+		},
+		{
+			Name: "encryptedData",
+			Validators: []forms.Validator{
+				forms.IsStringMap{
+					Form: &kbForms.ECDHEncryptedDataForm,
+				},
+			},
+		},
+	},
+}
+
+type BookSlotParams struct {
+	JSON      string        `json:"json"`
+	Data      *BookSlotData `json:"data"`
+	Signature []byte        `json:"signature"`
+	PublicKey []byte        `json:"publicKey"`
+}
+
+type BookSlotData struct {
+	ID              []byte                      `json:"id"`
+	EncryptedData   *services.ECDHEncryptedData `json:"encryptedData"`
+	SignedTokenData *SignedTokenData            `json:"signedTokenData"`
+}
+
+func (c *Appointments) bookSlot(context *jsonrpc.Context, params *BookSlotParams) *jsonrpc.Response {
+	return context.Acknowledge()
+}
+
+var CancelSlotForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "data",
+			Validators: []forms.Validator{
+				forms.IsString{},
+				JSON{
+					Key: "json",
+				},
+				forms.IsStringMap{
+					Form: &CancelSlotDataForm,
+				},
+			},
+		},
+		{
+			Name: "signature",
+			Validators: []forms.Validator{
+				forms.IsBytes{
+					Encoding:  "base64",
+					MaxLength: 1000,
+					MinLength: 50,
+				},
+			},
+		},
+		{
+			Name: "publicKey",
+			Validators: []forms.Validator{
+				forms.IsOptional{},
+				forms.IsBytes{
+					Encoding:  "base64",
+					MaxLength: 1000,
+					MinLength: 50,
+				},
+			},
+		},
+	},
+}
+
+var CancelSlotDataForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "id",
+			Validators: []forms.Validator{
+				ID,
+			},
+		},
+		{
+			Name: "signedTokenData",
+			Validators: []forms.Validator{
+				forms.IsOptional{},
+				forms.IsStringMap{
+					Form: &SignedTokenDataForm,
+				},
+			},
+		},
+	},
+}
+
+type CancelSlotParams struct {
+	JSON      string          `json:"json"`
+	Data      *CancelSlotData `json:"data"`
+	Signature []byte          `json:"signature"`
+	PublicKey []byte          `json:"publicKey"`
+}
+
+type CancelSlotData struct {
+	ID              []byte           `json:"id"`
+	SignedTokenData *SignedTokenData `json:"signedTokenData"`
+}
+
+func (c *Appointments) cancelSlot(context *jsonrpc.Context, params *CancelSlotParams) *jsonrpc.Response {
+	return context.Acknowledge()
+}
+
+func (c *Appointments) publishAppointments(context *jsonrpc.Context, params *PublishAppointmentsParams) *jsonrpc.Response {
+
+	// make sure this is a valid provider asking for tokens
+	resp, providerKey := c.isProvider(context, []byte(params.JSON), params.Signature, params.PublicKey)
+
+	if resp != nil {
+		return resp
+	}
+
+	pkd, err := providerKey.ProviderKeyData()
+
+	if err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+
+	services.Log.Info(pkd)
+
+	return context.Result(providerKey)
 }
 
 // { capacities }, keyPair
