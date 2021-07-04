@@ -30,14 +30,14 @@ type StorageSettings struct {
 }
 
 type AppointmentsSettings struct {
-	DataTTLDays          int64                  `json:"data_ttl_days,omitempty"`
-	RPC                  *JSONRPCServerSettings `json:"rpc,omitempty"`
-	Keys                 []*crypto.Key          `json:"keys,omitempty"`
-	Secret               []byte                 `json:"secret,omitempty"`
-	ProviderCodesEnabled bool                   `json:"provider_codes_enabled,omitempty"`
-	UserCodesEnabled     bool                   `json:"user_codes_enabled,omitempty"`
-	UserCodesReuseLimit  int64                  `json:"user_codes_reuse_limit"`
-	ProviderCodesReuseLimit int64               `json:"provider_codes_reuse_limit"`
+	DataTTLDays             int64                  `json:"data_ttl_days,omitempty"`
+	RPC                     *JSONRPCServerSettings `json:"rpc,omitempty"`
+	Keys                    []*crypto.Key          `json:"keys,omitempty"`
+	Secret                  []byte                 `json:"secret,omitempty"`
+	ProviderCodesEnabled    bool                   `json:"provider_codes_enabled,omitempty"`
+	UserCodesEnabled        bool                   `json:"user_codes_enabled,omitempty"`
+	UserCodesReuseLimit     int64                  `json:"user_codes_reuse_limit"`
+	ProviderCodesReuseLimit int64                  `json:"provider_codes_reuse_limit"`
 }
 
 func (a *AppointmentsSettings) Key(name string) *crypto.Key {

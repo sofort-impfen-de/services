@@ -141,8 +141,8 @@ type ECDSASignature struct {
 }
 
 func (e *ECDSASignature) Serialize() []byte {
-	// we simply concatenate the R & S values
-	return append(e.R.Bytes(), e.S.Bytes()...)
+	// we simply concatenate the R & S values, padded to 32 bytes each
+	return append(pad(e.R.Bytes(), 32), pad(e.S.Bytes(), 32)...)
 }
 
 func VerifyWithBytes(message, signature, publicKeyData []byte) (bool, error) {

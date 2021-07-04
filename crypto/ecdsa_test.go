@@ -46,7 +46,7 @@ func TestSignAndVerify(t *testing.T) {
 
 	if signature, err := Sign([]byte(mediatorSignedData.Data), keyPair.PrivateKey); err != nil {
 		t.Fatal(err)
-	} else if ok, err := Verify([]byte(mediatorSignedData.Data), append(signature.R.Bytes(), signature.S.Bytes()...), keyPair.PublicKey); !ok {
+	} else if ok, err := Verify([]byte(mediatorSignedData.Data), append(pad(signature.R.Bytes(), 32), pad(signature.S.Bytes(), 32)...), keyPair.PublicKey); !ok {
 		t.Fatalf("signature does not match...")
 	} else if err != nil {
 		t.Fatal(err)

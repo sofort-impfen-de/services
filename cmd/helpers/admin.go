@@ -442,8 +442,8 @@ func generateCodes(settings *services.Settings) func(c *cli.Context) error {
 
 		n := c.Int("n")
 
-		if n < 0 || n > 100000 {
-			services.Log.Fatal("n should be between 0 and 100.000")
+		if n < 0 || n > 1000000 {
+			services.Log.Fatal("n should be between 0 and 1.000.000")
 		}
 
 		actor := c.String("actor")
@@ -528,10 +528,7 @@ func uploadCodes(settings *services.Settings) func(c *cli.Context) error {
 			services.Log.Fatal(err)
 		}
 
-		t := time.Now()
-		codes := &Codes{
-			Timestamp: &t,
-		}
+		codes := &Codes{}
 		var rawCodes map[string]interface{}
 
 		if err := json.Unmarshal(jsonBytes, &rawCodes); err != nil {
@@ -552,24 +549,46 @@ func uploadCodes(settings *services.Settings) func(c *cli.Context) error {
 			services.Log.Fatal("can't find signing key")
 		}
 
-		bytes, err := json.Marshal(codes)
+		i := 0
+		allCodes := codes.Codes
 
-		if err != nil {
-			services.Log.Fatal(err)
-		}
+		N := 100
 
-		signedData, err := signingKey.SignString(string(bytes))
+		// we chunk the distances up
+		for i < len(allCodes) {
 
-		if err != nil {
-			services.Log.Fatal(err)
-		}
+			j := i + N
+			if j >= len(allCodes) {
+				j = len(allCodes)
+			}
 
-		request := jsonrpc.MakeRequest("addCodes", "", signedData.AsMap())
+			services.Log.Infof("Submitting codes [%d, %d] from %d in total...", i, j, len(allCodes))
 
-		if response, err := client.Call(request); err != nil {
-			services.Log.Fatal(err)
-		} else {
-			services.Log.Info(response.AsJSON())
+			t := time.Now()
+			codes.Timestamp = &t
+			codes.Codes = allCodes[i:j]
+
+			i += N
+
+			bytes, err := json.Marshal(codes)
+
+			if err != nil {
+				services.Log.Fatal(err)
+			}
+
+			signedData, err := signingKey.SignString(string(bytes))
+
+			if err != nil {
+				services.Log.Fatal(err)
+			}
+
+			request := jsonrpc.MakeRequest("addCodes", "", signedData.AsMap())
+
+			if response, err := client.Call(request); err != nil {
+				services.Log.Fatal(err)
+			} else {
+				services.Log.Info(response.AsJSON())
+			}
 		}
 
 		return nil

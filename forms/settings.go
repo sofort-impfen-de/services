@@ -274,9 +274,9 @@ var AppointmentsForm = forms.Form{
 				forms.IsOptional{Default: 0},
 				forms.IsInteger{
 					HasMin: true,
-					Min: 0,
+					Min:    0,
 					HasMax: true,
-					Max: 1000,
+					Max:    1000,
 				},
 			},
 		},
@@ -286,9 +286,9 @@ var AppointmentsForm = forms.Form{
 				forms.IsOptional{Default: 0},
 				forms.IsInteger{
 					HasMin: true,
-					Min: 0,
+					Min:    0,
 					HasMax: true,
-					Max: 1000,
+					Max:    1000,
 				},
 			},
 		},
