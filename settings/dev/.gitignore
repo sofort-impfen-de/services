@@ -1,3 +1,2 @@
-003_secrets.yml
-002_certs.yml
-queues.json
+*
+!001_default.yml

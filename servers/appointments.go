@@ -604,7 +604,7 @@ func (c *Appointments) addMediatorPublicKeys(context *jsonrpc.Context, params *A
 		services.Log.Error("root key missing")
 		return context.InternalError()
 	}
-	if ok, err := rootKey.Verify(&services.SignedData{
+	if ok, err := rootKey.Verify(&crypto.SignedData{
 		Data:      []byte(params.JSON),
 		Signature: params.Signature,
 	}); !ok {
@@ -730,7 +730,7 @@ func (c *Appointments) addCodes(context *jsonrpc.Context, params *AddCodesParams
 		services.Log.Error("root key missing")
 		return context.InternalError()
 	}
-	if ok, err := rootKey.Verify(&services.SignedData{
+	if ok, err := rootKey.Verify(&crypto.SignedData{
 		Data:      []byte(params.JSON),
 		Signature: params.Signature,
 	}); !ok {
@@ -903,7 +903,7 @@ func (c *Appointments) uploadDistances(context *jsonrpc.Context, params *UploadD
 		services.Log.Error("root key missing")
 		return context.InternalError()
 	}
-	if ok, err := rootKey.Verify(&services.SignedData{
+	if ok, err := rootKey.Verify(&crypto.SignedData{
 		Data:      []byte(params.JSON),
 		Signature: params.Signature,
 	}); !ok {
@@ -1018,7 +1018,7 @@ func (c *Appointments) setQueues(context *jsonrpc.Context, params *SetQueuesPara
 		services.Log.Error("root key missing")
 		return context.InternalError()
 	}
-	if ok, err := rootKey.Verify(&services.SignedData{
+	if ok, err := rootKey.Verify(&crypto.SignedData{
 		Data:      []byte(params.JSON),
 		Signature: params.Signature,
 	}); !ok {
@@ -1270,12 +1270,19 @@ func (c *Appointments) getKeysData() (*Keys, error) {
 		return nil, err
 	}
 
+	providerDataKey := c.settings.Key("provider")
+
+	// to do: remove once the settings are updated
+	if providerDataKey == nil {
+		providerDataKey = c.settings.Key("providerData")
+	}
+
 	return &Keys{
 		Lists: &KeyLists{
 			Providers: providerKeys,
 			Mediators: mediatorKeys,
 		},
-		ProviderData: c.settings.Key("providerData").PublicKey,
+		ProviderData: providerDataKey.PublicKey,
 		RootKey:      c.settings.Key("root").PublicKey,
 		TokenKey:     c.settings.Key("token").PublicKey,
 	}, nil
@@ -2417,6 +2424,7 @@ func (c *Appointments) getToken(context *jsonrpc.Context, params *GetTokenParams
 	defer finalize()
 
 	codes := c.db.Set("codes", []byte("user"))
+	codeScores := c.db.SortedSet("codeScores", []byte("user"))
 
 	tokenKey := c.settings.Key("token")
 	if tokenKey == nil {
@@ -2430,14 +2438,14 @@ func (c *Appointments) getToken(context *jsonrpc.Context, params *GetTokenParams
 	activeTokensSet := transaction.SortedSet("tokens", []byte("active"))
 
 	var queueToken *QueueToken
-	var signedData *services.SignedStringData
+	var signedData *crypto.SignedStringData
 
 	// this is an update call
 	if params.SignedTokenData != nil {
 
 		services.Log.Debug("Updating token...")
 
-		signedData = &services.SignedStringData{
+		signedData = &crypto.SignedStringData{
 			Data:      params.SignedTokenData.JSON,
 			Signature: params.SignedTokenData.Signature,
 		}
@@ -2584,7 +2592,20 @@ func (c *Appointments) getToken(context *jsonrpc.Context, params *GetTokenParams
 	if params.SignedTokenData == nil {
 		// if this is a new token we delete the user code
 		if c.settings.UserCodesEnabled {
-			if err := codes.Del(params.Code); err != nil {
+			score, err := codeScores.Score(params.Code)
+			if err != nil && err != databases.NotFound {
+				services.Log.Error(err)
+				return context.InternalError()
+			}
+
+			score += 1
+
+			if score > c.settings.UserCodesReuseLimit {
+				if err := codes.Del(params.Code); err != nil {
+					services.Log.Error(err)
+					return context.InternalError()
+				}
+			} else if err := codeScores.Add(params.Code, score); err != nil {
 				services.Log.Error(err)
 				return context.InternalError()
 			}
@@ -2606,6 +2627,12 @@ func (c *Appointments) getToken(context *jsonrpc.Context, params *GetTokenParams
 
 			// we add the info that this token is active
 			if err := c.meter.AddOnce("tokens", "active", hexUID, data, tw, 1); err != nil {
+				services.Log.Error(err)
+				continue
+			}
+
+			// we add the info that this token is active (without the zip code)
+			if err := c.meter.AddOnce("tokens", "active", hexUID, nil, tw, 1); err != nil {
 				services.Log.Error(err)
 				continue
 			}
@@ -2722,6 +2749,16 @@ var CapacityForm = forms.Form{
 			},
 		},
 		{
+			Name: "bookings",
+			Validators: []forms.Validator{
+				forms.IsOptional{Default: 0},
+				forms.IsInteger{
+					HasMin: true,
+					Min:    0,
+				},
+			},
+		},
+		{
 			Name: "tokens",
 			Validators: []forms.Validator{
 				forms.IsOptional{Default: 0},
@@ -2757,6 +2794,7 @@ type Capacity struct {
 	Tokens     int64                  `json:"tokens"`
 	Open       int64                  `json:"open"`
 	Booked     int64                  `json:"booked"`
+	Bookings   int64                  `json:"bookings"`
 	Properties map[string]interface{} `json:"properties"`
 }
 
@@ -2807,13 +2845,14 @@ func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueue
 		return context.InternalError()
 	}
 
-	var totalCapacity, totalTokens, totalOpen, totalOpenTokens, totalBooked int64
+	var totalCapacity, totalTokens, totalOpen, totalOpenTokens, totalBooked, totalBookings int64
 	// to do: better balancing and check queue data
 	for _, capacity := range params.Data.Capacities {
 		totalCapacity += capacity.N
 		totalOpen += capacity.Open
 		totalOpenTokens += capacity.Tokens
 		totalBooked += capacity.Booked
+		totalBookings += capacity.Bookings
 		tokens := []*QueueToken{}
 		for len(tokens) < int(capacity.N) {
 			noMoreTokens := true
@@ -2952,6 +2991,10 @@ func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueue
 			}
 			// we add the maximum of the booked appointments
 			if err := c.meter.AddMax("queues", "booked", hexUID, data, tw, int64(math.Min(1000, float64(totalBooked)))); err != nil {
+				return err
+			}
+			// we add the maximum of the booked appointments
+			if err := c.meter.Add("queues", "bookings", data, tw, int64(math.Min(1000, float64(totalBookings)))); err != nil {
 				return err
 			}
 			// we add the maximum of the difference between capacity and available tokens
@@ -3109,6 +3152,7 @@ func (c *Appointments) storeProviderData(context *jsonrpc.Context, params *Store
 	verifiedProviderData := transaction.Map("providerData", []byte("verified"))
 	providerData := transaction.Map("providerData", []byte("unverified"))
 	codes := transaction.Set("codes", []byte("provider"))
+	codeScores := c.db.SortedSet("codeScores", []byte("provider"))
 
 	existingData := false
 	if result, err := verifiedProviderData.Get(params.Data.ID); err != nil {
@@ -3166,7 +3210,20 @@ func (c *Appointments) storeProviderData(context *jsonrpc.Context, params *Store
 
 	// we delete the provider code
 	if c.settings.ProviderCodesEnabled {
-		if err := codes.Del(params.Data.Code); err != nil {
+		score, err := codeScores.Score(params.Data.Code)
+		if err != nil && err != databases.NotFound {
+			services.Log.Error(err)
+			return context.InternalError()
+		}
+
+		score += 1
+
+		if score > c.settings.ProviderCodesReuseLimit {
+			if err := codes.Del(params.Data.Code); err != nil {
+				services.Log.Error(err)
+				return context.InternalError()
+			}
+		} else if err := codeScores.Add(params.Data.Code, score); err != nil {
 			services.Log.Error(err)
 			return context.InternalError()
 		}
@@ -3712,8 +3769,7 @@ addMetric:
 					if _, ok := metric.Data[k]; ok {
 						continue addMetric
 					}
-				}
-				if dv, ok := metric.Data[k]; !ok || dv != v {
+				} else if dv, ok := metric.Data[k]; !ok || dv != v {
 					// filter value is missing or does not match
 					continue addMetric
 				}

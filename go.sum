@@ -6,6 +6,8 @@ github.com/go-redis/redis v6.15.9+incompatible h1:K0pv1D7EQUjfyoMql+r/jZqCLizCGK
 github.com/go-redis/redis v6.15.9+incompatible/go.mod h1:NAIEuMOZ/fxfXJIrKDQDz8wamY7mA7PouImQ2Jvg6kA=
 github.com/kiprotect/go-helpers v0.0.0-20210501184624-677c272d4158 h1:t38NiNpua5DKe9ati+5hVaZnjRuOLqWoc49dKRyYKi8=
 github.com/kiprotect/go-helpers v0.0.0-20210501184624-677c272d4158/go.mod h1:0LFiASSWLhyJjr452sbxRap2Klyv3GMDckMiESuC1ok=
+github.com/kiprotect/go-helpers v0.0.0-20210701203551-db1737d5d754 h1:9L0M69IfMIzucWWOOGPhSMmyt36zOLDCBFQSgZQWJI4=
+github.com/kiprotect/go-helpers v0.0.0-20210701203551-db1737d5d754/go.mod h1:eIQRg8JS++hWm0qzHR0XlWZgCD4zBQOnQHlrHxaHUQU=
 github.com/konsorten/go-windows-terminal-sequences v1.0.1/go.mod h1:T0+1ngSBFLxvqU3pZ+m/2kptfBszLMUkC4ZK/EgS/cQ=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/russross/blackfriday/v2 v2.0.1 h1:lPqVAte+HuHNfhJ/0LC98ESWRz8afy9tM/0RK8m9o+Q=

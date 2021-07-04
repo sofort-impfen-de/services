@@ -39,17 +39,3 @@ certs:
 	rm -rf settings/test/certs/*
 	(cd settings/dev/certs; ../../../.scripts/make_certs.sh)
 	(cd settings/test/certs; ../../../.scripts/make_certs.sh)
-	make extract-keys-for-settings
-
-extract-keys-for-settings:
-	python3 .scripts/extract_keys_for_settings.py
-
-queues:
-	python3 .scripts/make_queues.py
-
-example-data:
-	@.scripts/generate_example_data.sh
-
-examples:
-	@go build $(GOFLAGS) -tags examples ./...
-	@go install $(GOFLAGS) -tags examples ./...

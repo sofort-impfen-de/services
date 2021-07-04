@@ -17,23 +17,8 @@
 package servers
 
 import (
-	"crypto/rand"
 	"encoding/base64"
-	"fmt"
 )
-
-func RandomBytes(n int) ([]byte, error) {
-	b := make([]byte, n)
-	nr, err := rand.Read(b)
-	if err != nil {
-		return nil, err
-	}
-	if nr != n {
-		return nil, fmt.Errorf("not enough bytes read")
-	}
-
-	return b, nil
-}
 
 // in principle JSON will encode binary data as base64, but we do the conversion
 // explicitly just to avoid any potential inconsistencies that might arise in the future...

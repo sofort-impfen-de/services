@@ -155,7 +155,7 @@ var ECDSAParamsForm = forms.Form{
 		{
 			Name: "curve",
 			Validators: []forms.Validator{
-				forms.IsIn{Choices: []interface{}{"p-256"}}, // we only support P-256
+				forms.IsIn{Choices: []interface{}{"p-256", "P-256"}}, // we only support P-256
 			},
 		},
 	},
@@ -269,8 +269,33 @@ var AppointmentsForm = forms.Form{
 			},
 		},
 		{
+			Name: "user_codes_reuse_limit",
+			Validators: []forms.Validator{
+				forms.IsOptional{Default: 0},
+				forms.IsInteger{
+					HasMin: true,
+					Min:    0,
+					HasMax: true,
+					Max:    1000,
+				},
+			},
+		},
+		{
+			Name: "provider_codes_reuse_limit",
+			Validators: []forms.Validator{
+				forms.IsOptional{Default: 0},
+				forms.IsInteger{
+					HasMin: true,
+					Min:    0,
+					HasMax: true,
+					Max:    1000,
+				},
+			},
+		},
+		{
 			Name: "secret",
 			Validators: []forms.Validator{
+				forms.IsOptional{},
 				forms.IsBytes{
 					Encoding:  "base64",
 					MinLength: 16,

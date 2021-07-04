@@ -4,14 +4,14 @@ meter:
   type: redis
   settings:
     addresses: ["localhost:6379"]
-    database: 1
+    database: 3
     password: ""
 database:
   name: db
   type: redis
   settings:
     addresses: ["localhost:6379"]
-    database: 0
+    database: 2
     password: ""
 storage:
   settings_ttl_days: 60
@@ -29,11 +29,11 @@ admin:
   signing:
     keys: []
   client:
-    appointments_endpoint: "http://localhost:8888/jsonrpc"
-    storage_endpoint: "http://localhost:9999/jsonrpc"
+    appointments_endpoint: "https://appointments.sofort-impfen.de/jsonrpc"
+    storage_endpoint: "https://storage.sofort-impfen.de/jsonrpc"
 appointments:
-  user_codes_enabled: false
   provider_codes_enabled: false
+  user_codes_enabled: false
   keys: []
   rpc:
     bind_address: localhost:8888

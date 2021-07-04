@@ -21,12 +21,6 @@ import (
 	"encoding/base64"
 )
 
-type SignedData struct {
-	Signature string `json:"signature"`
-	Data      string `json:"data"`
-	PublicKey string `json:"publicKey"`
-}
-
 type StringKeyPair struct {
 	PublicKey  string `json:"publicKey"`
 	PrivateKey string `json:"privateKey"`
@@ -37,15 +31,6 @@ type KeyPair struct {
 	PublicKeyBytes  []byte            `json:"publicKeyBytes"`
 	PrivateKey      *ecdsa.PrivateKey `json:"-"`
 	PublicKey       *ecdsa.PublicKey  `json:"-"`
-}
-
-func (s *SignedData) Verify(publicKey *ecdsa.PublicKey) (bool, error) {
-
-	if signatureBytes, err := base64.StdEncoding.DecodeString(s.Signature); err != nil {
-		return false, err
-	} else {
-		return Verify([]byte(s.Data), signatureBytes, publicKey)
-	}
 }
 
 func KeyPairFromStrings(keyPair *StringKeyPair) (*KeyPair, error) {
