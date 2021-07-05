@@ -552,7 +552,7 @@ func uploadCodes(settings *services.Settings) func(c *cli.Context) error {
 		i := 0
 		allCodes := codes.Codes
 
-		N := 100
+		N := 500
 
 		// we chunk the distances up
 		for i < len(allCodes) {
