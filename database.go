@@ -78,6 +78,7 @@ type SortedSet interface {
 	Object
 	Del([]byte) (bool, error)
 	Add([]byte, int64) error
+	Range(int64, int64) ([]*SortedSetEntry, error)
 	At(int64) (*SortedSetEntry, error)
 	Score([]byte) (int64, error)
 	PopMin(int64) ([]*SortedSetEntry, error)

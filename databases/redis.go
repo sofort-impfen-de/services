@@ -386,6 +386,23 @@ func (r *RedisSortedSet) Del(data []byte) (bool, error) {
 	return n > 0, err
 }
 
+func (r *RedisSortedSet) Range(from, to int64) ([]*services.SortedSetEntry, error) {
+	result, err := r.db.Client().ZRangeWithScores(string(r.fullKey), from, to).Result()
+	if err != nil {
+		return nil, err
+	}
+
+	entries := []*services.SortedSetEntry{}
+
+	for _, entry := range result {
+		entries = append(entries, &services.SortedSetEntry{
+			Score: int64(entry.Score),
+			Data:  []byte(entry.Member.(string)),
+		})
+	}
+	return entries, nil
+}
+
 func (r *RedisSortedSet) At(index int64) (*services.SortedSetEntry, error) {
 	result, err := r.db.Client().ZRangeWithScores(string(r.fullKey), index, index).Result()
 	if err != nil {
