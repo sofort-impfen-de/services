@@ -26,16 +26,18 @@ type RPCSettings struct {
 
 type StorageSettings struct {
 	SettingsTTLDays int64                  `json:"settings_ttl_days"`
-	RPC             *JSONRPCServerSettings `json:"rpc"`
+	RPC             *JSONRPCServerSettings `json:"rpc,omitempty"`
 }
 
 type AppointmentsSettings struct {
-	DataTTLDays          int64                  `json:"data_ttl_days"`
-	RPC                  *JSONRPCServerSettings `json:"rpc"`
-	Keys                 []*Key                 `json:"keys"`
-	Secret               []byte                 `json:"secret"`
-	ProviderCodesEnabled bool                   `json:"provider_codes_enabled"`
-	UserCodesEnabled     bool                   `json:"user_codes_enabled"`
+	DataTTLDays             int64                  `json:"data_ttl_days,omitempty"`
+	RPC                     *JSONRPCServerSettings `json:"rpc,omitempty"`
+	Keys                    []*crypto.Key          `json:"keys,omitempty"`
+	Secret                  []byte                 `json:"secret,omitempty"`
+	ProviderCodesEnabled    bool                   `json:"provider_codes_enabled,omitempty"`
+	UserCodesEnabled        bool                   `json:"user_codes_enabled,omitempty"`
+	UserCodesReuseLimit     int64                  `json:"user_codes_reuse_limit"`
+	ProviderCodesReuseLimit int64                  `json:"provider_codes_reuse_limit"`
 }
 
 type NotificationSettings struct {
@@ -44,11 +46,11 @@ type NotificationSettings struct {
 	Secret []byte                 `json:"secret"`
 }
 
-func (a *AppointmentsSettings) Key(name string) *Key {
+func (a *AppointmentsSettings) Key(name string) *crypto.Key {
 	return key(a.Keys, name)
 }
 
-func key(keys []*Key, name string) *Key {
+func key(keys []*crypto.Key, name string) *crypto.Key {
 	for _, key := range keys {
 		if key.Name == name {
 			return key
@@ -57,93 +59,12 @@ func key(keys []*Key, name string) *Key {
 	return nil
 }
 
-type Key struct {
-	Name      string                 `json:"name"`
-	Type      string                 `json:"type"`
-	Format    string                 `json:"format"`
-	Params    map[string]interface{} `json:"params"`
-	PublicKey []byte                 `json:"public_key"`
-	Purposes  []string               `json:"purposes"`
-	// only defined for local signing operations
-	PrivateKey []byte `json:"private_key"`
-}
-
-type SignedStringData struct {
-	Data      string `json:"data"`
-	Signature []byte `json:"signature"`
-	PublicKey []byte `json:"publicKey"`
-}
-
-func (s *SignedStringData) AsMap() map[string]interface{} {
-	return map[string]interface{}{
-		"data":      s.Data,
-		"signature": s.Signature,
-		"publicKey": s.PublicKey,
-	}
-}
-
-type SignedData struct {
-	Data      []byte `json:"data"`
-	Signature []byte `json:"signature"`
-	PublicKey []byte `json:"publicKey"`
-}
-
-func (s *SignedData) AsMap() map[string]interface{} {
-	return map[string]interface{}{
-		"data":      s.Data,
-		"signature": s.Signature,
-		"publicKey": s.PublicKey,
-	}
-}
-
-func (k *Key) SignString(data string) (*SignedStringData, error) {
-	if signature, err := k.Sign([]byte(data)); err != nil {
-		return nil, err
-	} else {
-		return &SignedStringData{
-			Data:      string(signature.Data),
-			Signature: signature.Signature,
-			PublicKey: signature.PublicKey,
-		}, nil
-	}
-}
-
-func (k *Key) Sign(data []byte) (*SignedData, error) {
-	if privateKey, err := crypto.LoadPrivateKey(k.PrivateKey); err != nil {
-		return nil, err
-	} else if signature, err := crypto.Sign(data, privateKey); err != nil {
-		return nil, err
-	} else {
-		return &SignedData{
-			Data:      data,
-			Signature: signature.Serialize(),
-			PublicKey: k.PublicKey,
-		}, nil
-	}
-}
-
-func (k *Key) Verify(data *SignedData) (bool, error) {
-	if publicKey, err := crypto.LoadPublicKey(k.PublicKey); err != nil {
-		return false, err
-	} else {
-		return crypto.Verify(data.Data, data.Signature, publicKey)
-	}
-}
-
-func (k *Key) VerifyString(data *SignedStringData) (bool, error) {
-	if publicKey, err := crypto.LoadPublicKey(k.PublicKey); err != nil {
-		return false, err
-	} else {
-		return crypto.Verify([]byte(data.Data), data.Signature, publicKey)
-	}
-}
-
-func (s *SigningSettings) Key(name string) *Key {
+func (s *SigningSettings) Key(name string) *crypto.Key {
 	return key(s.Keys, name)
 }
 
 type SigningSettings struct {
-	Keys []*Key `json:"keys"`
+	Keys []*crypto.Key `json:"keys"`
 }
 
 type DatabaseSettings struct {
@@ -157,20 +78,20 @@ type MeterSettings struct {
 }
 
 type Settings struct {
-	Admin        *AdminSettings        `json:"admin"`
-	Definitions  *Definitions          `json:"definitions"`
-	Storage      *StorageSettings      `json:"storage"`
-	Appointments *AppointmentsSettings `json:"appointments"`
+	Admin        *AdminSettings        `json:"admin,omitempty"`
+	Definitions  *Definitions          `json:"definitions,omitempty"`
+	Storage      *StorageSettings      `json:"storage,omitempty"`
+	Appointments *AppointmentsSettings `json:"appointments,omitempty"`
 	Notification *NotificationSettings `json:"notification"`
-	Database     *DatabaseSettings     `json:"database"`
-	Meter        *MeterSettings        `json:"meter"`
+	Database     *DatabaseSettings     `json:"database,omitempty"`
+	Meter        *MeterSettings        `json:"meter,omitempty"`
 	DatabaseObj  Database              `json:"-"`
 	MeterObj     Meter                 `json:"-"`
 }
 
 type AdminSettings struct {
-	Signing *SigningSettings `json:"signing"`
-	Client  *ClientSettings  `json:"client"`
+	Signing *SigningSettings `json:"signing,omitempty"`
+	Client  *ClientSettings  `json:"client,omitempty"`
 }
 
 type ClientSettings struct {
@@ -192,14 +113,14 @@ type CorsSettings struct {
 
 // Settings for the JSON-RPC server
 type JSONRPCServerSettings struct {
-	Cors        *CorsSettings `json:"cors"`
-	TLS         *TLSSettings  `json:"tls"`
+	Cors        *CorsSettings `json:"cors,omitempty"`
+	TLS         *TLSSettings  `json:"tls,omitempty"`
 	BindAddress string        `json:"bind_address"`
 }
 
 // Settings for the JSON-RPC server
 type HTTPServerSettings struct {
-	TLS         *TLSSettings `json:"tls"`
+	TLS         *TLSSettings `json:"tls,omitempty"`
 	BindAddress string       `json:"bind_address"`
 }
 

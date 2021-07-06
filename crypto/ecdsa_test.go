@@ -17,6 +17,7 @@
 package crypto
 
 import (
+	"encoding/base64"
 	"testing"
 )
 
@@ -25,11 +26,14 @@ var mediatorKeyPairStr = &StringKeyPair{
 	PrivateKey: "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgTQC14mzj7PCvV7D6SNgBisYA2+Ue1g+wmFusbAbL8TShRANCAATb8KyGmYuHu006kd/OOVpUb+488RJMh8QHACLfiY5+C/Tn7E7ZRiGInWwmEEgFmPkH8Swash7GCI4c+c/VHqzM",
 }
 
+var mediatorSignature, _ = base64.StdEncoding.DecodeString("oyZ739CCFErHP7deXnlZS7l99SNdShKEOFASrQ3Ul5cxkJOMXOWrfgH4PH6nCuN+bhwaaYi4uKOEfJ6JWdmOyA==")
+var mediatorPublicKey, _ = base64.StdEncoding.DecodeString("MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEHYzaq9/ZDs+eQvKYFYtFsyKhO6dS0iw5I/jNVIOCZjmHTQW/2ohEGN0oiLRFUTtbyX9+PP7d18WbsJl1ne2Srg==")
+
 // the JSON is ASCII-encoded
 var mediatorSignedData = &SignedData{
-	Signature: "oyZ739CCFErHP7deXnlZS7l99SNdShKEOFASrQ3Ul5cxkJOMXOWrfgH4PH6nCuN+bhwaaYi4uKOEfJ6JWdmOyA==",
-	Data:      `{"signing":"g5FZ+uqweopJgNV9OUQjCk3mpkxojMzBRAAl/2koM7A=","encryption":"jtMum/FovAknQ7P+IObA9t/htwVSBCRlXti5+HqisUk=","zipCode":"10734","queues":["jCEXaOa9Xzpd7p13Gxf8/6XNgYa0MwtkFGfis/Ug1xs="]}`,
-	PublicKey: "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEHYzaq9/ZDs+eQvKYFYtFsyKhO6dS0iw5I/jNVIOCZjmHTQW/2ohEGN0oiLRFUTtbyX9+PP7d18WbsJl1ne2Srg==",
+	Signature: mediatorSignature,
+	Data:      []byte(`{"signing":"g5FZ+uqweopJgNV9OUQjCk3mpkxojMzBRAAl/2koM7A=","encryption":"jtMum/FovAknQ7P+IObA9t/htwVSBCRlXti5+HqisUk=","zipCode":"10734","queues":["jCEXaOa9Xzpd7p13Gxf8/6XNgYa0MwtkFGfis/Ug1xs="]}`),
+	PublicKey: mediatorPublicKey,
 }
 
 func TestSignAndVerify(t *testing.T) {
@@ -42,7 +46,7 @@ func TestSignAndVerify(t *testing.T) {
 
 	if signature, err := Sign([]byte(mediatorSignedData.Data), keyPair.PrivateKey); err != nil {
 		t.Fatal(err)
-	} else if ok, err := Verify([]byte(mediatorSignedData.Data), append(signature.R.Bytes(), signature.S.Bytes()...), keyPair.PublicKey); !ok {
+	} else if ok, err := Verify([]byte(mediatorSignedData.Data), append(pad(signature.R.Bytes(), 32), pad(signature.S.Bytes(), 32)...), keyPair.PublicKey); !ok {
 		t.Fatalf("signature does not match...")
 	} else if err != nil {
 		t.Fatal(err)

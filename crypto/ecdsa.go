@@ -18,14 +18,99 @@ package crypto
 
 import (
 	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
+	"encoding/base64"
 	"fmt"
 	"math/big"
 )
 
 // https://thanethomson.com/2018/11/30/validating-ecdsa-signatures-golang/
+
+func GenerateKey() (*ecdsa.PrivateKey, error) {
+	return ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+}
+
+type JWKPrivateKey struct {
+	Curve       string   `json:"crv"`
+	D           string   `json:"d"`
+	Extractable bool     `json:"ext"`
+	KeyOps      []string `json:"key_ops"`
+	KeyType     string   `json:"kty"`
+	X           string   `json:"x"`
+	Y           string   `json:"y"`
+}
+
+type WebKey struct {
+	// PKIX ASN.1 DER format
+	PublicKey string `json:"publicKey"`
+	// JWK format (as Firefox can't parse PKCS8...)
+	PrivateKey *JWKPrivateKey `json:"privateKey"`
+}
+
+func AsSettingsKey(key *ecdsa.PrivateKey, name, keyType string) (*Key, error) {
+	marshalledPublicKey, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
+	if err != nil {
+		return nil, err
+	}
+	marshalledPrivateKey, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		return nil, err
+	}
+
+	var purposes []string
+
+	switch keyType {
+	case "ecdh":
+		purposes = []string{"deriveKey"}
+	case "ecdsa":
+		purposes = []string{"sign", "verify"}
+	}
+
+	return &Key{
+		Type:       keyType,
+		PublicKey:  marshalledPublicKey,
+		PrivateKey: marshalledPrivateKey,
+		Purposes:   purposes,
+		Params: map[string]interface{}{
+			"curve": "p-256",
+		},
+		Name:   name,
+		Format: "spki-pkcs8",
+	}, nil
+
+}
+
+func AsWebKey(key *ecdsa.PrivateKey, keyType string) (*WebKey, error) {
+	marshalledPublicKey, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
+	if err != nil {
+		return nil, err
+	}
+
+	var ops []string
+
+	switch keyType {
+	case "ecdh":
+		ops = []string{"deriveKey"}
+	case "ecdsa":
+		ops = []string{"sign", "verify"}
+	}
+
+	return &WebKey{
+		PublicKey: base64.StdEncoding.EncodeToString(marshalledPublicKey),
+		PrivateKey: &JWKPrivateKey{
+			Curve:       key.Params().Name,
+			D:           base64.RawURLEncoding.EncodeToString(key.D.Bytes()),
+			Extractable: true,
+			KeyOps:      ops,
+			KeyType:     "EC",
+			X:           base64.RawURLEncoding.EncodeToString(key.X.Bytes()),
+			Y:           base64.RawURLEncoding.EncodeToString(key.Y.Bytes()),
+		},
+	}, nil
+}
 
 func LoadPublicKey(publicKey []byte) (*ecdsa.PublicKey, error) {
 	pub, err := x509.ParsePKIXPublicKey(publicKey)
@@ -56,8 +141,8 @@ type ECDSASignature struct {
 }
 
 func (e *ECDSASignature) Serialize() []byte {
-	// we simply concatenate the R & S values
-	return append(e.R.Bytes(), e.S.Bytes()...)
+	// we simply concatenate the R & S values, padded to 32 bytes each
+	return append(pad(e.R.Bytes(), 32), pad(e.S.Bytes(), 32)...)
 }
 
 func VerifyWithBytes(message, signature, publicKeyData []byte) (bool, error) {

@@ -14,24 +14,41 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-package servers
+package crypto
 
 import (
-	"encoding/base64"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"io"
 )
 
-// in principle JSON will encode binary data as base64, but we do the conversion
-// explicitly just to avoid any potential inconsistencies that might arise in the future...
-func Encode(data []byte) string {
-	return base64.StdEncoding.EncodeToString(data)
+type EncryptedData struct {
+	IV   []byte `json:"iv"`
+	Data []byte `json:"data"`
 }
 
-// in principle JSON will encode binary data as base64, but we do the conversion
-// explicitly just to avoid any potential inconsistencies that might arise in the future...
-func EncodeSlice(data [][]byte) []string {
-	strings := make([]string, len(data))
-	for i, d := range data {
-		strings[i] = base64.StdEncoding.EncodeToString(d)
+func Encrypt(data, key []byte) (*EncryptedData, error) {
+	iv := make([]byte, 12)
+	if _, err := io.ReadFull(rand.Reader, iv); err != nil {
+		return nil, err
 	}
-	return strings
+
+	block, err := aes.NewCipher(key)
+
+	if err != nil {
+		return nil, err
+	}
+
+	gcm, err := cipher.NewGCM(block)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &EncryptedData{Data: gcm.Seal(nil, iv, data, nil), IV: iv}, nil
+}
+
+func Decrypt(data *EncryptedData, key []byte) ([]byte, error) {
+	return nil, nil
 }

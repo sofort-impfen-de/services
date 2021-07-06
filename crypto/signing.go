@@ -14,24 +14,40 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-package servers
+package crypto
 
 import (
-	"encoding/base64"
+	"crypto/ecdsa"
 )
 
-// in principle JSON will encode binary data as base64, but we do the conversion
-// explicitly just to avoid any potential inconsistencies that might arise in the future...
-func Encode(data []byte) string {
-	return base64.StdEncoding.EncodeToString(data)
+type SignedStringData struct {
+	Data      string `json:"data"`
+	Signature []byte `json:"signature"`
+	PublicKey []byte `json:"publicKey"`
 }
 
-// in principle JSON will encode binary data as base64, but we do the conversion
-// explicitly just to avoid any potential inconsistencies that might arise in the future...
-func EncodeSlice(data [][]byte) []string {
-	strings := make([]string, len(data))
-	for i, d := range data {
-		strings[i] = base64.StdEncoding.EncodeToString(d)
+func (s *SignedStringData) AsMap() map[string]interface{} {
+	return map[string]interface{}{
+		"data":      s.Data,
+		"signature": s.Signature,
+		"publicKey": s.PublicKey,
 	}
-	return strings
+}
+
+type SignedData struct {
+	Data      []byte `json:"data"`
+	Signature []byte `json:"signature"`
+	PublicKey []byte `json:"publicKey"`
+}
+
+func (s *SignedData) AsMap() map[string]interface{} {
+	return map[string]interface{}{
+		"data":      s.Data,
+		"signature": s.Signature,
+		"publicKey": s.PublicKey,
+	}
+}
+
+func (s *SignedData) Verify(publicKey *ecdsa.PublicKey) (bool, error) {
+	return Verify([]byte(s.Data), s.Signature, publicKey)
 }
