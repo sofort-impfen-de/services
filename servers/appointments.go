@@ -2953,6 +2953,18 @@ var tws = []services.TimeWindowFunc{
 var GetAppointmentsByZipCodeForm = forms.Form{
 	Fields: []forms.Field{
 		{
+			Name: "radius",
+			Validators: []forms.Validator{
+				forms.IsOptional{Default: 50},
+				forms.IsInteger{
+					HasMin: true,
+					HasMax: true,
+					Min:    5,
+					Max:    80,
+				},
+			},
+		},
+		{
 			Name: "zipCode",
 			Validators: []forms.Validator{
 				forms.IsString{

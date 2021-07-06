@@ -399,7 +399,7 @@ func uploadDistances(settings *services.Settings) func(c *cli.Context) error {
 		i := 0
 		allDistances := distances.Distances
 
-		N := 10000
+		N := 1000
 
 		// we chunk the distances up
 		for i < len(allDistances) {
