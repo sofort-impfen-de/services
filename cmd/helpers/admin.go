@@ -261,12 +261,14 @@ func setupKeys(settings *services.Settings) func(c *cli.Context) error {
 
 		adminKeys := []*crypto.Key{}
 		apptKeys := []*crypto.Key{}
+		notificationsKeys := []*crypto.Key{}
 
 		keys := map[string]string{
-			"root":     "ecdsa",
-			"token":    "ecdsa",
-			"provider": "ecdh",
-			"queue":    "ecdh",
+			"root":          "ecdsa",
+			"token":         "ecdsa",
+			"notifications": "ecdh",
+			"provider":      "ecdh",
+			"queue":         "ecdh",
 		}
 
 		for name, keyType := range keys {
@@ -292,6 +294,10 @@ func setupKeys(settings *services.Settings) func(c *cli.Context) error {
 			}
 
 			apptKeys = append(apptKeys, &keyCopy)
+
+			if name == "notifications" {
+				notificationsKeys = append(notificationsKeys, &keyCopy)
+			}
 
 		}
 
@@ -323,6 +329,10 @@ func setupKeys(settings *services.Settings) func(c *cli.Context) error {
 		}
 
 		adminJson, err := json.MarshalIndent(adminSettings, "", "  ")
+
+		if err != nil {
+			services.Log.Fatal(err)
+		}
 
 		if err != nil {
 			services.Log.Fatal(err)
