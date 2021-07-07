@@ -17,8 +17,10 @@
 package servers
 
 import (
+	"encoding/json"
 	"fmt"
 	"github.com/kiebitz-oss/services"
+	"github.com/kiebitz-oss/services/crypto"
 	"github.com/kiebitz-oss/services/jsonrpc"
 	"github.com/kiprotect/go-helpers/forms"
 	"net/smtp"
@@ -27,6 +29,7 @@ import (
 type Notification struct {
 	settings *services.NotificationSettings
 	server   *jsonrpc.JSONRPCServer
+	db       services.Database
 }
 
 func (c *Notification) Start() error {
@@ -41,7 +44,7 @@ type sendNotificationParams struct {
 }
 
 type removeMailParams struct {
-	Mail string `json:"mail"`
+	Data string `json:"data"`
 }
 
 var SendNotificationsForm = forms.Form{
@@ -51,7 +54,7 @@ var SendNotificationsForm = forms.Form{
 var RemoveMailForm = forms.Form{
 	Fields: []forms.Field{
 		{
-			Name: "mail",
+			Name: "data",
 			Validators: []forms.Validator{
 				forms.IsString{},
 			},
@@ -63,6 +66,7 @@ func MakeNotification(settings *services.Settings) (*Notification, error) {
 
 	Notification := &Notification{
 		settings: settings.Notification,
+		db:       settings.DatabaseObj,
 	}
 
 	methods := map[string]*jsonrpc.Method{
@@ -99,8 +103,65 @@ func (c *Notification) sendNotifications(context *jsonrpc.Context, params *sendN
 }
 
 func (c *Notification) removeMail(context *jsonrpc.Context, params *removeMailParams) *jsonrpc.Response {
+	removedMails := c.db.Set("removedMails", []byte("mails"))
+
+	removedMailMembers, err := removedMails.Members()
+	if err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+
+	mailAlreadyRemoved, err := c.mailAlreadyRemoved(params.Data, removedMailMembers)
+	if err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	} else if !mailAlreadyRemoved {
+		err = c.addRemovedMail(params.Data, removedMails)
+		if err != nil {
+			services.Log.Error(err)
+			return context.InternalError()
+		}
+	}
 
 	return context.Acknowledge()
+}
+
+func (c *Notification) addRemovedMail(mailHashToRemove string, removedMails services.Set) error {
+	encrypt, err := crypto.Encrypt([]byte(mailHashToRemove), c.settings.Secret)
+	if err != nil {
+		return err
+	}
+
+	marshal, err := json.Marshal(encrypt)
+	if err != nil {
+		return err
+	}
+
+	err = removedMails.Add(marshal)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *Notification) mailAlreadyRemoved(mailHashToCheck string, removedMailMembers []*services.SetEntry) (bool, error) {
+	for _, member := range removedMailMembers {
+		var encryptedMailHash *crypto.EncryptedData
+		err := json.Unmarshal(member.Data, &encryptedMailHash)
+		if err != nil {
+			return false, err
+		}
+		decryptedMailHash, err := crypto.Decrypt(encryptedMailHash, c.settings.Secret)
+		if err != nil {
+			return false, err
+		}
+
+		if string(decryptedMailHash) == mailHashToCheck {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func sendMails(mailSettings *services.MailSettings) {

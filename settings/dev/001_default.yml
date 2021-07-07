@@ -55,6 +55,7 @@ notification:
       allowed_hosts: ["http://localhost:8080"]
       allowed_headers: ["*"]
       allowed_methods: ["POST"]
+  secret: c29mb3J0LWltcGZlbi5kZQ==
   mail:
     smtp_host: "localhost"
     smtp_port: 1025

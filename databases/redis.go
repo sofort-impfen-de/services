@@ -338,6 +338,22 @@ func (r *RedisSet) Del(data []byte) error {
 	return r.db.Client().SRem(string(r.fullKey), string(data)).Err()
 }
 
+func (r *RedisSet) Members() ([]*services.SetEntry, error) {
+	result, err := r.db.Client().SMembers(string(r.fullKey)).Result()
+	if err != nil {
+		return nil, err
+	}
+
+	var entries []*services.SetEntry
+
+	for _, entry := range result {
+		entries = append(entries, &services.SetEntry{
+			Data: []byte(entry),
+		})
+	}
+	return entries, nil
+}
+
 type RedisValue struct {
 	db      *Redis
 	fullKey []byte

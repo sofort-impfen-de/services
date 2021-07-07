@@ -66,7 +66,12 @@ type Set interface {
 	Add([]byte) error
 	Has([]byte) (bool, error)
 	Del(key []byte) error
+	Members() ([]*SetEntry, error)
 	Object
+}
+
+type SetEntry struct {
+	Data []byte
 }
 
 type SortedSetEntry struct {
