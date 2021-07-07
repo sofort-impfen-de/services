@@ -2953,6 +2953,18 @@ var tws = []services.TimeWindowFunc{
 var GetAppointmentsByZipCodeForm = forms.Form{
 	Fields: []forms.Field{
 		{
+			Name: "radius",
+			Validators: []forms.Validator{
+				forms.IsOptional{Default: 50},
+				forms.IsInteger{
+					HasMin: true,
+					HasMax: true,
+					Min:    5,
+					Max:    80,
+				},
+			},
+		},
+		{
 			Name: "zipCode",
 			Validators: []forms.Validator{
 				forms.IsString{
@@ -2971,7 +2983,7 @@ type GetAppointmentsByZipCodeParams struct {
 
 type ProviderAppointments struct {
 	Provider     *SignedProviderData `json:"provider"`
-	Appointments []*Appointment      `json:"appointments"`
+	Appointments []*SignedAppointment      `json:"appointments"`
 }
 
 type SignedProviderData struct {
@@ -3073,12 +3085,15 @@ func (c *Appointments) getAppointmentsByZipCode(context *jsonrpc.Context, params
 			services.Log.Error(err)
 		}
 
-		appointments := []*Appointment{}
+		appointments := []*SignedAppointment{}
 
 		for _, data := range allAppointments {
-			var appointment *Appointment
+			var appointment *SignedAppointment
 			if err := json.Unmarshal(data, &appointment); err != nil {
 				services.Log.Error(err)
+				continue
+			}
+			if appointment.JSON == "" || appointment.PublicKey == nil || appointment.Signature == nil {
 				continue
 			}
 			appointments = append(appointments, appointment)
@@ -3183,6 +3198,44 @@ var AppointmentPropertiesForm = forms.Form{
 var AppointmentForm = forms.Form{
 	Fields: []forms.Field{
 		{
+			Name: "data",
+			Validators: []forms.Validator{
+				forms.IsString{},
+				JSON{
+					Key: "json",
+				},
+				forms.IsStringMap{
+					Form: &AppointmentDataForm,
+				},
+			},
+		},
+		{
+			Name: "signature",
+			Validators: []forms.Validator{
+				forms.IsBytes{
+					Encoding:  "base64",
+					MaxLength: 1000,
+					MinLength: 50,
+				},
+			},
+		},
+		{
+			Name: "publicKey",
+			Validators: []forms.Validator{
+				forms.IsOptional{},
+				forms.IsBytes{
+					Encoding:  "base64",
+					MaxLength: 1000,
+					MinLength: 50,
+				},
+			},
+		},
+	},
+}
+
+var AppointmentDataForm = forms.Form{
+	Fields: []forms.Field{
+		{
 			Name: "timestamp",
 			Validators: []forms.Validator{
 				forms.IsTime{Format: "rfc3339"},
@@ -3266,7 +3319,14 @@ type PublishAppointmentsParams struct {
 
 type PublishAppointmentsData struct {
 	Timestamp    *time.Time     `json:"timestamp"`
-	Appointments []*Appointment `json:"appointments"`
+	Appointments []*SignedAppointment `json:"appointments"`
+}
+
+type SignedAppointment struct {
+	JSON      string   `json:"data" coerce:"name:json"`
+	Data      *Appointment `json:"-" coerce:"name:data"`
+	Signature []byte   `json:"signature"`
+	PublicKey []byte   `json:"publicKey"`
 }
 
 type Appointment struct {
@@ -3329,7 +3389,7 @@ func (c *Appointments) publishAppointments(context *jsonrpc.Context, params *Pub
 		if jsonData, err := json.Marshal(appointment); err != nil {
 			services.Log.Error(err)
 			return context.InternalError()
-		} else if err := appointments.Set(appointment.ID, jsonData); err != nil {
+		} else if err := appointments.Set(appointment.Data.ID, jsonData); err != nil {
 			services.Log.Error(err)
 			return context.InternalError()
 		}
@@ -3531,12 +3591,20 @@ type BookSlotData struct {
 }
 
 type Booking struct {
-	AppointmentID []byte                      `json:"appointmentID"`
-	SlotID        []byte                      `json:"slotID"`
+	ID            []byte                      `json:"id"`
+	PublicKey     []byte                      `json:"publicKey"`
 	EncryptedData *services.ECDHEncryptedData `json:"encryptedData"`
 }
 
 func (c *Appointments) bookSlot(context *jsonrpc.Context, params *BookSlotParams) *jsonrpc.Response {
+
+	// we verify the signature (without veryfing e.g. the provenance of the key)
+	if ok, err := crypto.VerifyWithBytes([]byte(params.JSON), params.Signature, params.PublicKey); err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	} else if !ok {
+		return context.Error(400, "invalid signature", nil)
+	}
 
 	success := false
 	transaction, finalize, err := c.transaction(&success)
@@ -3583,7 +3651,7 @@ findAppointment:
 		return context.NotFound()
 	}
 
-	//bookings := transaction.Map("bookings", params.Data.ProviderID)
+	bookings := transaction.Map("bookings", params.Data.ProviderID)
 
 	// appointments expire automatically after 120 days
 	if err := transaction.Expire("bookings", params.Data.ProviderID, time.Hour*24*120); err != nil {
@@ -3591,18 +3659,37 @@ findAppointment:
 		return context.InternalError()
 	}
 
-	/*
-		if result := c.verifyPermissions(context, transaction, params.Data.ProviderID, []string{"write"}, params.PublicKey, true); result != nil {
-			return result
-		}
+	existingBooking := &Booking{}
 
-		// we give the provider the right to write and delete this data again
-		if result := c.setPermissions(context, transaction, providerID, permissions, params.PublicKey, 0); result != nil {
-			return result
+	if existingBookingData, err := bookings.Get(params.Data.ID); err != nil {
+		if err != databases.NotFound {
+			services.Log.Error(err)
+			return context.InternalError()
 		}
-	*/
+	} else if err := json.Unmarshal(existingBookingData, &existingBooking); err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	} else if !bytes.Equal(existingBooking.PublicKey, params.PublicKey) {
+		// the public key does not match
+		return context.Error(401, "permission denied", nil)
+	}
+
+	booking := &Booking{
+		PublicKey: params.PublicKey,
+		ID: params.Data.ID,
+		EncryptedData: params.Data.EncryptedData,
+	}
+
+	if data, err := json.Marshal(booking); err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	} else if err := bookings.Set(params.Data.ID, data); err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
 
 	return context.Acknowledge()
+
 }
 
 var CancelSlotForm = forms.Form{
