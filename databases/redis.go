@@ -180,6 +180,7 @@ func (d *Redis) Begin() (services.Transaction, error) {
 					services.Log.Error(err)
 				}
 			}
+
 			nd.mutex.Unlock()
 
 			nd.channel <- commit
