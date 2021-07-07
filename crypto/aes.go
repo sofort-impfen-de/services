@@ -50,5 +50,18 @@ func Encrypt(data, key []byte) (*EncryptedData, error) {
 }
 
 func Decrypt(data *EncryptedData, key []byte) ([]byte, error) {
-	return nil, nil
+
+	block, err := aes.NewCipher(key)
+
+	if err != nil {
+		return nil, err
+	}
+
+	gcm, err := cipher.NewGCM(block)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return gcm.Open(nil, data.IV, data.Data, nil)
 }
