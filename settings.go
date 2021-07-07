@@ -44,10 +44,15 @@ type NotificationSettings struct {
 	RPC    *JSONRPCServerSettings `json:"rpc"`
 	Mail   *MailSettings          `json:"mail"`
 	Secret []byte                 `json:"secret"`
+	Keys   []*crypto.Key          `json:"keys"`
 }
 
 func (a *AppointmentsSettings) Key(name string) *crypto.Key {
 	return key(a.Keys, name)
+}
+
+func (n *NotificationSettings) Key(name string) *crypto.Key {
+	return key(n.Keys, name)
 }
 
 func key(keys []*crypto.Key, name string) *crypto.Key {

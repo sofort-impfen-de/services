@@ -218,6 +218,18 @@ var NotificationForm = forms.Form{
 			},
 		},
 		{
+			Name: "keys",
+			Validators: []forms.Validator{
+				forms.IsList{
+					Validators: []forms.Validator{
+						forms.IsStringMap{
+							Form: &KeyForm,
+						},
+					},
+				},
+			},
+		},
+		{
 			Name: "mail",
 			Validators: []forms.Validator{
 				forms.IsStringMap{

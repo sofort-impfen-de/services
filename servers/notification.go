@@ -17,6 +17,8 @@
 package servers
 
 import (
+	"crypto/ecdsa"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"github.com/kiebitz-oss/services"
@@ -40,15 +42,64 @@ func (c *Notification) Stop() error {
 	return c.server.Stop()
 }
 
+type MailNotification struct {
+	PublicKey []byte `json:"publicKey"`
+	Iv        []byte `json:"iv"`
+	Data      []byte `json:"data"`
+}
+
 type sendNotificationParams struct {
+	Notifications []MailNotification `json:"notifications"`
 }
 
 type removeMailParams struct {
 	Data string `json:"data"`
 }
 
+var MailNotificationForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "publicKey",
+			Validators: []forms.Validator{
+				forms.IsBytes{
+					Encoding: "base64",
+				},
+			},
+		},
+		{
+			Name: "iv",
+			Validators: []forms.Validator{
+				forms.IsBytes{
+					Encoding: "base64",
+				},
+			},
+		},
+		{
+			Name: "data",
+			Validators: []forms.Validator{
+				forms.IsBytes{
+					Encoding: "base64",
+				},
+			},
+		},
+	},
+}
+
 var SendNotificationsForm = forms.Form{
-	Fields: []forms.Field{},
+	Fields: []forms.Field{
+		{
+			Name: "notifications",
+			Validators: []forms.Validator{
+				forms.IsList{
+					Validators: []forms.Validator{
+						forms.IsStringMap{
+							Form: &MailNotificationForm,
+						},
+					},
+				},
+			},
+		},
+	},
 }
 
 var RemoveMailForm = forms.Form{
@@ -96,27 +147,57 @@ func MakeNotification(settings *services.Settings) (*Notification, error) {
 }
 
 func (c *Notification) sendNotifications(context *jsonrpc.Context, params *sendNotificationParams) *jsonrpc.Response {
-
-	sendMails(c.settings.Mail)
-
-	return context.Acknowledge()
-}
-
-func (c *Notification) removeMail(context *jsonrpc.Context, params *removeMailParams) *jsonrpc.Response {
-	removedMails := c.db.Set("removedMails", []byte("mails"))
-
-	removedMailMembers, err := removedMails.Members()
+	notificationsKey := c.settings.Key("notifications")
+	notificationsPrivateKey, err := crypto.LoadPrivateKey(notificationsKey.PrivateKey)
 	if err != nil {
 		services.Log.Error(err)
 		return context.InternalError()
 	}
 
-	mailAlreadyRemoved, err := c.mailAlreadyRemoved(params.Data, removedMailMembers)
+	for _, notification := range params.Notifications {
+		mail, err := c.decryptMail(notification, notificationsPrivateKey)
+		if err != nil {
+			services.Log.Error(err)
+			return context.InternalError()
+		}
+
+		mailOnBlockList, err := c.mailOnBlockList(hex.EncodeToString(crypto.Hash(mail)))
+		if !mailOnBlockList {
+			sendMail(string(mail), c.settings.Mail)
+		}
+
+	}
+	return context.Acknowledge()
+}
+
+func (c *Notification) decryptMail(notification MailNotification, notificationsPrivateKey *ecdsa.PrivateKey) (mail []byte, err error) {
+	requestPublicKey, err := crypto.LoadPublicKey(notification.PublicKey)
+	if err != nil {
+		return nil, err
+	}
+
+	encryptedData := &crypto.EncryptedData{
+		Data: notification.Data,
+		IV:   notification.Iv,
+	}
+
+	sharedKey := crypto.DeriveKey(requestPublicKey, notificationsPrivateKey)
+	decrypt, err := crypto.Decrypt(encryptedData, sharedKey)
+	if err != nil {
+		return nil, err
+	}
+
+	return decrypt, nil
+}
+
+func (c *Notification) removeMail(context *jsonrpc.Context, params *removeMailParams) *jsonrpc.Response {
+
+	mailAlreadyOnyBlockList, err := c.mailOnBlockList(params.Data)
 	if err != nil {
 		services.Log.Error(err)
 		return context.InternalError()
-	} else if !mailAlreadyRemoved {
-		err = c.addRemovedMail(params.Data, removedMails)
+	} else if !mailAlreadyOnyBlockList {
+		err = c.addRemovedMail(params.Data)
 		if err != nil {
 			services.Log.Error(err)
 			return context.InternalError()
@@ -126,7 +207,12 @@ func (c *Notification) removeMail(context *jsonrpc.Context, params *removeMailPa
 	return context.Acknowledge()
 }
 
-func (c *Notification) addRemovedMail(mailHashToRemove string, removedMails services.Set) error {
+func (c *Notification) getRemovedMailsSet() services.Set {
+	return c.db.Set("removedMails", []byte("mails"))
+}
+
+func (c *Notification) addRemovedMail(mailHashToRemove string) error {
+	removedMails := c.getRemovedMailsSet()
 	encrypt, err := crypto.Encrypt([]byte(mailHashToRemove), c.settings.Secret)
 	if err != nil {
 		return err
@@ -145,7 +231,14 @@ func (c *Notification) addRemovedMail(mailHashToRemove string, removedMails serv
 	return nil
 }
 
-func (c *Notification) mailAlreadyRemoved(mailHashToCheck string, removedMailMembers []*services.SetEntry) (bool, error) {
+func (c *Notification) mailOnBlockList(mailHashToCheck string) (bool, error) {
+	removedMails := c.getRemovedMailsSet()
+
+	removedMailMembers, err := removedMails.Members()
+	if err != nil {
+		return false, err
+	}
+
 	for _, member := range removedMailMembers {
 		var encryptedMailHash *crypto.EncryptedData
 		err := json.Unmarshal(member.Data, &encryptedMailHash)
@@ -164,7 +257,7 @@ func (c *Notification) mailAlreadyRemoved(mailHashToCheck string, removedMailMem
 	return false, nil
 }
 
-func sendMails(mailSettings *services.MailSettings) {
+func sendMail(mail string, mailSettings *services.MailSettings) {
 	// Set up authentication information.
 	auth := smtp.PlainAuth("", mailSettings.SmtpUser, mailSettings.SmtpPassword, mailSettings.SmtpHost)
 
@@ -172,7 +265,7 @@ func sendMails(mailSettings *services.MailSettings) {
 	// and send the email all in one step.
 	to := []string{"recipient@example.net"}
 	msg := "From: " + mailSettings.Sender + "\n" +
-		"To: recipient@example.net \n" +
+		"To: " + mail + " \n" +
 		"MIME-version: 1.0;\n" +
 		"Content-Type: text/html;charset=\"UTF-8\";\n" +
 		"Subject: " + mailSettings.MailSubject + "\n\n" +

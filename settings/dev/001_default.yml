@@ -56,6 +56,16 @@ notification:
       allowed_headers: ["*"]
       allowed_methods: ["POST"]
   secret: c29mb3J0LWltcGZlbi5kZQ==
+  keys:
+    - name: "notifications"
+      type: "ecdh"
+      format: "spki-pkcs8"
+      params:
+        curve: "p-256"
+      public_key: "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEb9XkRMHqQCwd8n0vhcecokVdXcpOF6k8gYYhhREq07P2pYte/9QTjumPDyX1CHT/HmsuYEcinJxMsnuKhwjtxQ=="
+      purposes:
+          - "deriveKey"
+      private_key: "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg6S42Zzh9WgdPlKGug+qwpir/ZKKRHAx3Wz3w1cRrxpuhRANCAARv1eREwepALB3yfS+Fx5yiRV1dyk4XqTyBhiGFESrTs/ali17/1BOO6Y8PJfUIdP8eay5gRyKcnEyye4qHCO3F"
   mail:
     smtp_host: "localhost"
     smtp_port: 1025
