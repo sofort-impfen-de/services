@@ -105,6 +105,10 @@ func MakeAppointments(settings *services.Settings) (*Appointments, error) {
 			Form:    &GetBookedAppointmentsForm,
 			Handler: Appointments.getBookedAppointments,
 		},
+		"cancelBooking": {
+			Form:    &CancelBookingForm,
+			Handler: Appointments.cancelBooking,
+		},
 		"bookSlot": {
 			Form:    &BookSlotForm,
 			Handler: Appointments.bookSlot,
@@ -330,14 +334,6 @@ var ProviderDataForm = forms.Form{
 			Name: "zipCode",
 			Validators: []forms.Validator{
 				forms.IsString{},
-			},
-		},
-		{
-			Name: "queues",
-			Validators: []forms.Validator{
-				forms.IsList{
-					Validators: []forms.Validator{ID},
-				},
 			},
 		},
 	},
@@ -2982,8 +2978,9 @@ type GetAppointmentsByZipCodeParams struct {
 }
 
 type ProviderAppointments struct {
-	Provider     *SignedProviderData `json:"provider"`
-	Appointments []*SignedAppointment      `json:"appointments"`
+	Provider *SignedProviderData  `json:"provider"`
+	Offers   []*SignedAppointment `json:"offers"`
+	Booked   [][]byte             `json:"booked"`
 }
 
 type SignedProviderData struct {
@@ -2995,11 +2992,10 @@ type SignedProviderData struct {
 }
 
 type ProviderData struct {
-	Name    string   `json:"name"`
-	Street  string   `json:"street"`
-	City    string   `json:"city"`
-	ZipCode string   `json:"zipCode"`
-	Queues  [][]byte `json:"queues"`
+	Name    string `json:"name"`
+	Street  string `json:"street"`
+	City    string `json:"city"`
+	ZipCode string `json:"zipCode"`
 }
 
 /*
@@ -3078,6 +3074,15 @@ func (c *Appointments) getAppointmentsByZipCode(context *jsonrpc.Context, params
 
 		providerData.ID = hash
 
+		bookings := c.db.Map("bookings", hash)
+
+		allBookings, err := bookings.GetAll()
+
+		if err != nil {
+			services.Log.Error(err)
+			continue
+		}
+
 		appointmentsMap := c.db.Map("appointments", hash)
 		allAppointments, err := appointmentsMap.GetAll()
 
@@ -3099,9 +3104,16 @@ func (c *Appointments) getAppointmentsByZipCode(context *jsonrpc.Context, params
 			appointments = append(appointments, appointment)
 		}
 
+		bookedSlots := [][]byte{}
+
+		for k, _ := range allBookings {
+			bookedSlots = append(bookedSlots, []byte(k))
+		}
+
 		providerAppointments := &ProviderAppointments{
-			Provider:     providerData,
-			Appointments: appointments,
+			Provider: providerData,
+			Offers:   appointments,
+			Booked:   bookedSlots,
 		}
 
 		providerAppointmentsList = append(providerAppointmentsList, providerAppointments)
@@ -3170,7 +3182,7 @@ var PublishAppointmentsDataForm = forms.Form{
 			},
 		},
 		{
-			Name: "appointments",
+			Name: "offers",
 			Validators: []forms.Validator{
 				forms.IsList{
 					Validators: []forms.Validator{
@@ -3278,7 +3290,7 @@ var AppointmentDataForm = forms.Form{
 			},
 		},
 		{
-			Name: "slots",
+			Name: "slotData",
 			Validators: []forms.Validator{
 				forms.IsList{
 					Validators: []forms.Validator{
@@ -3300,13 +3312,6 @@ var SlotForm = forms.Form{
 				ID,
 			},
 		},
-		{
-			Name: "open",
-			Validators: []forms.Validator{
-				forms.IsOptional{Default: true},
-				forms.IsBoolean{},
-			},
-		},
 	},
 }
 
@@ -3318,29 +3323,28 @@ type PublishAppointmentsParams struct {
 }
 
 type PublishAppointmentsData struct {
-	Timestamp    *time.Time     `json:"timestamp"`
-	Appointments []*SignedAppointment `json:"appointments"`
+	Timestamp *time.Time           `json:"timestamp"`
+	Offers    []*SignedAppointment `json:"offers"`
 }
 
 type SignedAppointment struct {
-	JSON      string   `json:"data" coerce:"name:json"`
+	JSON      string       `json:"data" coerce:"name:json"`
 	Data      *Appointment `json:"-" coerce:"name:data"`
-	Signature []byte   `json:"signature"`
-	PublicKey []byte   `json:"publicKey"`
+	Signature []byte       `json:"signature"`
+	PublicKey []byte       `json:"publicKey"`
 }
 
 type Appointment struct {
 	Timestamp  time.Time              `json:"timestamp"`
 	Duration   int64                  `json:"duration"`
 	Properties map[string]interface{} `json:"properties"`
-	Slots      []*Slot                `json:"slots"`
+	SlotData   []*Slot                `json:"slotData"`
 	ID         []byte                 `json:"id"`
 	PublicKey  []byte                 `json:"publicKey"`
 }
 
 type Slot struct {
-	ID   []byte `json:"id"`
-	Open bool   `json:"open"`
+	ID []byte `json:"id"`
 }
 
 func (c *Appointments) publishAppointments(context *jsonrpc.Context, params *PublishAppointmentsParams) *jsonrpc.Response {
@@ -3385,11 +3389,40 @@ func (c *Appointments) publishAppointments(context *jsonrpc.Context, params *Pub
 		return context.InternalError()
 	}
 
-	for _, appointment := range params.Data.Appointments {
+	bookings := c.db.Map("bookings", hash)
+	allBookings, err := bookings.GetAll()
+
+	if err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+
+	for _, appointment := range params.Data.Offers {
+		for _, slot := range appointment.Data.SlotData {
+			delete(allBookings, string(slot.ID))
+		}
 		if jsonData, err := json.Marshal(appointment); err != nil {
 			services.Log.Error(err)
 			return context.InternalError()
 		} else if err := appointments.Set(appointment.Data.ID, jsonData); err != nil {
+			services.Log.Error(err)
+			return context.InternalError()
+		}
+	}
+
+	usedTokens := transaction.Set("bookings", []byte("tokens"))
+	// we delete all bookings for slots that have been removed by the provider
+	for k, data := range allBookings {
+
+		existingBooking := &Booking{}
+
+		if err := json.Unmarshal(data, &existingBooking); err != nil {
+			services.Log.Error(err)
+		} else if err := usedTokens.Del(existingBooking.Token); err != nil {
+			services.Log.Error(err)
+		}
+
+		if err := bookings.Del([]byte(k)); err != nil {
 			services.Log.Error(err)
 			return context.InternalError()
 		}
@@ -3400,6 +3433,16 @@ func (c *Appointments) publishAppointments(context *jsonrpc.Context, params *Pub
 	return context.Acknowledge()
 }
 
+var GetBookedAppointmentsDataForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "timestamp",
+			Validators: []forms.Validator{
+				forms.IsTime{Format: "rfc3339"},
+			},
+		},
+	},
+}
 var GetBookedAppointmentsForm = forms.Form{
 	Fields: []forms.Field{
 		{
@@ -3410,7 +3453,7 @@ var GetBookedAppointmentsForm = forms.Form{
 					Key: "json",
 				},
 				forms.IsStringMap{
-					Form: &PublishAppointmentsDataForm,
+					Form: &GetBookedAppointmentsDataForm,
 				},
 			},
 		},
@@ -3495,6 +3538,106 @@ func (c *Appointments) getBookedAppointments(context *jsonrpc.Context, params *G
 	return context.Result(bookingsList)
 }
 
+var CancelBookingDataForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "timestamp",
+			Validators: []forms.Validator{
+				forms.IsTime{Format: "rfc3339"},
+			},
+		},
+		{
+			Name: "id",
+			Validators: []forms.Validator{
+				ID,
+			},
+		},
+	},
+}
+var CancelBookingForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "data",
+			Validators: []forms.Validator{
+				forms.IsString{},
+				JSON{
+					Key: "json",
+				},
+				forms.IsStringMap{
+					Form: &CancelBookingDataForm,
+				},
+			},
+		},
+		{
+			Name: "signature",
+			Validators: []forms.Validator{
+				forms.IsBytes{
+					Encoding:  "base64",
+					MaxLength: 1000,
+					MinLength: 50,
+				},
+			},
+		},
+		{
+			Name: "publicKey",
+			Validators: []forms.Validator{
+				forms.IsOptional{},
+				forms.IsBytes{
+					Encoding:  "base64",
+					MaxLength: 1000,
+					MinLength: 50,
+				},
+			},
+		},
+	},
+}
+
+type CancelBookingParams struct {
+	JSON      string             `json:"json"`
+	Data      *CancelBookingData `json:"data"`
+	Signature []byte             `json:"signature"`
+	PublicKey []byte             `json:"publicKey"`
+}
+
+type CancelBookingData struct {
+	Timestamp *time.Time `json:"timestamp"`
+	ID        []byte     `json:"id"`
+}
+
+func (c *Appointments) cancelBooking(context *jsonrpc.Context, params *CancelBookingParams) *jsonrpc.Response {
+
+	// make sure this is a valid provider asking for tokens
+	resp, providerKey := c.isProvider(context, []byte(params.JSON), params.Signature, params.PublicKey)
+
+	if resp != nil {
+		return resp
+	}
+
+	if expired(params.Data.Timestamp) {
+		return context.Error(410, "signature expired", nil)
+	}
+
+	pkd, err := providerKey.ProviderKeyData()
+
+	if err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+
+	// the provider "ID" is the hash of the signing key
+	hash := crypto.Hash(pkd.Signing)
+
+	bookings := c.db.Map("bookings", hash)
+
+	if err := bookings.Del(params.Data.ID); err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+
+	return context.Acknowledge()
+
+}
+
 var BookSlotForm = forms.Form{
 	Fields: []forms.Field{
 		{
@@ -3558,7 +3701,6 @@ var BookSlotDataForm = forms.Form{
 		{
 			Name: "signedTokenData",
 			Validators: []forms.Validator{
-				forms.IsOptional{},
 				forms.IsStringMap{
 					Form: &SignedTokenDataForm,
 				},
@@ -3593,18 +3735,11 @@ type BookSlotData struct {
 type Booking struct {
 	ID            []byte                      `json:"id"`
 	PublicKey     []byte                      `json:"publicKey"`
+	Token         []byte                      `json:"token"`
 	EncryptedData *services.ECDHEncryptedData `json:"encryptedData"`
 }
 
 func (c *Appointments) bookSlot(context *jsonrpc.Context, params *BookSlotParams) *jsonrpc.Response {
-
-	// we verify the signature (without veryfing e.g. the provenance of the key)
-	if ok, err := crypto.VerifyWithBytes([]byte(params.JSON), params.Signature, params.PublicKey); err != nil {
-		services.Log.Error(err)
-		return context.InternalError()
-	} else if !ok {
-		return context.Error(400, "invalid signature", nil)
-	}
 
 	success := false
 	transaction, finalize, err := c.transaction(&success)
@@ -3616,6 +3751,41 @@ func (c *Appointments) bookSlot(context *jsonrpc.Context, params *BookSlotParams
 
 	defer finalize()
 
+	usedTokens := transaction.Set("bookings", []byte("tokens"))
+
+	notAuthorized := context.Error(401, "not authorized", nil)
+
+	signedData := &crypto.SignedStringData{
+		Data:      params.Data.SignedTokenData.JSON,
+		Signature: params.Data.SignedTokenData.Signature,
+	}
+
+	tokenKey := c.settings.Key("token")
+
+	if ok, err := tokenKey.VerifyString(signedData); err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	} else if !ok {
+		return context.Error(400, "invalid signature", nil)
+	}
+
+	token := params.Data.SignedTokenData.Data.Token
+
+	if ok, err := usedTokens.Has(token); err != nil {
+		services.Log.Error()
+		return context.InternalError()
+	} else if ok {
+		return notAuthorized
+	}
+
+	// we verify the signature (without veryfing e.g. the provenance of the key)
+	if ok, err := crypto.VerifyWithBytes([]byte(params.JSON), params.Signature, params.PublicKey); err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	} else if !ok {
+		return context.Error(400, "invalid signature", nil)
+	}
+
 	appointmentsMap := c.db.Map("appointments", params.Data.ProviderID)
 	allAppointments, err := appointmentsMap.GetAll()
 
@@ -3623,11 +3793,15 @@ func (c *Appointments) bookSlot(context *jsonrpc.Context, params *BookSlotParams
 		services.Log.Error(err)
 	}
 
-	appointments := []*Appointment{}
+	appointments := []*SignedAppointment{}
 
 	for _, data := range allAppointments {
-		var appointment *Appointment
+		var appointment *SignedAppointment
 		if err := json.Unmarshal(data, &appointment); err != nil {
+			services.Log.Error(err)
+			continue
+		}
+		if err := json.Unmarshal([]byte(appointment.JSON), &appointment.Data); err != nil {
 			services.Log.Error(err)
 			continue
 		}
@@ -3639,9 +3813,9 @@ func (c *Appointments) bookSlot(context *jsonrpc.Context, params *BookSlotParams
 	// we find the right appointment
 findAppointment:
 	for _, appt := range appointments {
-		for _, slot := range appt.Slots {
+		for _, slot := range appt.Data.SlotData {
 			if bytes.Equal(slot.ID, params.Data.ID) {
-				appointment = appt
+				appointment = appt.Data
 				break findAppointment
 			}
 		}
@@ -3675,8 +3849,9 @@ findAppointment:
 	}
 
 	booking := &Booking{
-		PublicKey: params.PublicKey,
-		ID: params.Data.ID,
+		PublicKey:     params.PublicKey,
+		ID:            params.Data.ID,
+		Token:         token,
 		EncryptedData: params.Data.EncryptedData,
 	}
 
@@ -3684,6 +3859,11 @@ findAppointment:
 		services.Log.Error(err)
 		return context.InternalError()
 	} else if err := bookings.Set(params.Data.ID, data); err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+
+	if err := usedTokens.Add(token); err != nil {
 		services.Log.Error(err)
 		return context.InternalError()
 	}
@@ -3739,9 +3919,14 @@ var CancelSlotDataForm = forms.Form{
 			},
 		},
 		{
+			Name: "providerID",
+			Validators: []forms.Validator{
+				ID,
+			},
+		},
+		{
 			Name: "signedTokenData",
 			Validators: []forms.Validator{
-				forms.IsOptional{},
 				forms.IsStringMap{
 					Form: &SignedTokenDataForm,
 				},
@@ -3758,12 +3943,87 @@ type CancelSlotParams struct {
 }
 
 type CancelSlotData struct {
-	ID              []byte           `json:"id"`
+	ProviderID      []byte           `json:"providerID"`
 	SignedTokenData *SignedTokenData `json:"signedTokenData"`
+	ID              []byte           `json:"id"`
 }
 
 func (c *Appointments) cancelSlot(context *jsonrpc.Context, params *CancelSlotParams) *jsonrpc.Response {
+	// we verify the signature (without veryfing e.g. the provenance of the key)
+	if ok, err := crypto.VerifyWithBytes([]byte(params.JSON), params.Signature, params.PublicKey); err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	} else if !ok {
+		return context.Error(400, "invalid signature", nil)
+	}
+
+	success := false
+	transaction, finalize, err := c.transaction(&success)
+
+	if err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+
+	defer finalize()
+
+	bookings := transaction.Map("bookings", params.Data.ProviderID)
+
+	existingBooking := &Booking{}
+
+	if existingBookingData, err := bookings.Get(params.Data.ID); err != nil {
+		if err == databases.NotFound {
+			return context.NotFound()
+		}
+		services.Log.Error(err)
+		return context.InternalError()
+	} else if err := json.Unmarshal(existingBookingData, &existingBooking); err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	} else if !bytes.Equal(existingBooking.PublicKey, params.PublicKey) {
+		// the public key does not match
+		return context.Error(401, "permission denied", nil)
+	}
+
+	if err := bookings.Del(params.Data.ID); err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+
+	// we reenabe the token
+
+	usedTokens := transaction.Set("bookings", []byte("tokens"))
+
+	signedData := &crypto.SignedStringData{
+		Data:      params.Data.SignedTokenData.JSON,
+		Signature: params.Data.SignedTokenData.Signature,
+	}
+
+	tokenKey := c.settings.Key("token")
+
+	if ok, err := tokenKey.VerifyString(signedData); err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	} else if !ok {
+		return context.Error(400, "invalid signature", nil)
+	}
+
+	token := params.Data.SignedTokenData.Data.Token
+
+	if ok, err := usedTokens.Has(token); err != nil {
+		services.Log.Error()
+		return context.InternalError()
+	} else if !ok {
+		return context.Error(401, "not authorized", nil)
+	}
+
+	if err := usedTokens.Del(token); err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+
 	return context.Acknowledge()
+
 }
 
 // { capacities }, keyPair
