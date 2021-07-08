@@ -2664,7 +2664,6 @@ type ProviderData struct {
 
 /*
 - Get all neighbors of the given zip code within the given radius
--
 */
 func (c *Appointments) getAppointmentsByZipCode(context *jsonrpc.Context, params *GetAppointmentsByZipCodeParams) *jsonrpc.Response {
 
@@ -3051,6 +3050,12 @@ func (c *Appointments) publishAppointments(context *jsonrpc.Context, params *Pub
 
 	// appointments are stored in a provider-specific key
 	appointments := transaction.Map("appointments", hash)
+	allAppointments, err := appointments.GetAll()
+
+	if err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
 
 	// appointments expire automatically after 120 days
 	if err := transaction.Expire("appointments", hash, time.Hour*24*120); err != nil {
@@ -3069,6 +3074,7 @@ func (c *Appointments) publishAppointments(context *jsonrpc.Context, params *Pub
 	var bookedSlots, openSlots int64
 
 	for _, appointment := range params.Data.Offers {
+		delete(allAppointments, string(appointment.Data.ID))
 		for _, slot := range appointment.Data.SlotData {
 			if _, ok := allBookings[string(slot.ID)]; ok {
 				bookedSlots += 1
@@ -3081,6 +3087,14 @@ func (c *Appointments) publishAppointments(context *jsonrpc.Context, params *Pub
 			services.Log.Error(err)
 			return context.InternalError()
 		} else if err := appointments.Set(appointment.Data.ID, jsonData); err != nil {
+			services.Log.Error(err)
+			return context.InternalError()
+		}
+	}
+
+	// we delete appointments that are not referenced in the new data
+	for k, _ := range allAppointments {
+		if err := appointments.Del([]byte(k)); err != nil {
 			services.Log.Error(err)
 			return context.InternalError()
 		}
