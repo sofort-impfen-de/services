@@ -21,6 +21,7 @@ import (
 	"github.com/go-redis/redis"
 	"github.com/kiebitz-oss/services"
 	"github.com/kiprotect/go-helpers/forms"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -419,6 +420,26 @@ func (r *RedisSortedSet) Range(from, to int64) ([]*services.SortedSetEntry, erro
 	return entries, nil
 }
 
+func (r *RedisSortedSet) RangeByScore(from, to int64) ([]*services.SortedSetEntry, error) {
+	result, err := r.db.Client().ZRangeByScoreWithScores(string(r.fullKey), redis.ZRangeBy{
+		Min: strconv.FormatInt(from, 10),
+		Max: strconv.FormatInt(to, 10),
+	}).Result()
+	if err != nil {
+		return nil, err
+	}
+
+	entries := []*services.SortedSetEntry{}
+
+	for _, entry := range result {
+		entries = append(entries, &services.SortedSetEntry{
+			Score: int64(entry.Score),
+			Data:  []byte(entry.Member.(string)),
+		})
+	}
+	return entries, nil
+}
+
 func (r *RedisSortedSet) At(index int64) (*services.SortedSetEntry, error) {
 	result, err := r.db.Client().ZRangeWithScores(string(r.fullKey), index, index).Result()
 	if err != nil {
@@ -449,6 +470,14 @@ func (r *RedisSortedSet) PopMin(n int64) ([]*services.SortedSetEntry, error) {
 		})
 	}
 	return entries, nil
+}
+
+func (r *RedisSortedSet) RemoveRangeByScore(from, to int64) error {
+	_, err := r.db.Client().ZRemRangeByScore(string(r.fullKey), strconv.FormatInt(from, 10), strconv.FormatInt(to, 10)).Result()
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 /*

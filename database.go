@@ -84,9 +84,11 @@ type SortedSet interface {
 	Del([]byte) (bool, error)
 	Add([]byte, int64) error
 	Range(int64, int64) ([]*SortedSetEntry, error)
+	RangeByScore(int64, int64) ([]*SortedSetEntry, error)
 	At(int64) (*SortedSetEntry, error)
 	Score([]byte) (int64, error)
 	PopMin(int64) ([]*SortedSetEntry, error)
+	RemoveRangeByScore(int64, int64) error
 }
 
 type List interface {

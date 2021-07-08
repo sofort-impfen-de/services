@@ -26,6 +26,7 @@ import (
 	"github.com/kiebitz-oss/services/jsonrpc"
 	"github.com/kiprotect/go-helpers/forms"
 	"net/smtp"
+	"time"
 )
 
 type Notification struct {
@@ -154,20 +155,87 @@ func (c *Notification) sendNotifications(context *jsonrpc.Context, params *sendN
 		return context.InternalError()
 	}
 
-	for _, notification := range params.Notifications {
+	MailBlockSet := c.getBlockedMailsSet()
+	mailBlockSetMembers, err := MailBlockSet.Members()
+	if err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+
+	sentMails := c.getSentMailsSet()
+	notifiedMails, err := sentMails.RangeByScore(c.getMailingThresholdInSeconds(), time.Now().Unix())
+	if err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+
+	c.processNotifications(
+		params.Notifications,
+		notificationsPrivateKey,
+		mailBlockSetMembers,
+		notifiedMails,
+		sentMails)
+	c.recentlyNotifiedHousekeeping()
+
+	return context.Acknowledge()
+}
+
+func (c *Notification) processNotifications(notifications []MailNotification,
+	notificationsPrivateKey *ecdsa.PrivateKey,
+	removedMailMembers []*services.SetEntry,
+	notifiedMails []*services.SortedSetEntry,
+	sentMails services.SortedSet) {
+	for _, notification := range notifications {
 		mail, err := c.decryptMail(notification, notificationsPrivateKey)
 		if err != nil {
 			services.Log.Error(err)
-			return context.InternalError()
+			continue
 		}
 
-		mailOnBlockList, err := c.mailOnBlockList(hex.EncodeToString(crypto.Hash(mail)))
-		if !mailOnBlockList {
-			sendMail(string(mail), c.settings.Mail)
+		hashedMail := c.hashMail(mail)
+		mailOnBlockList, err := c.mailOnBlockList(hashedMail, removedMailMembers)
+		if err != nil {
+			services.Log.Error(err)
+			continue
+		}
+
+		recentlyNotified, err := c.recentlyNotified(hashedMail, notifiedMails)
+		if err != nil {
+			services.Log.Error(err)
+			continue
+		}
+
+		if !mailOnBlockList && !recentlyNotified {
+			err := c.performMailNotification(mail, sentMails)
+			if err != nil {
+				services.Log.Error(err)
+				continue
+			}
 		}
 
 	}
-	return context.Acknowledge()
+}
+
+func (c *Notification) hashMail(mail []byte) string {
+	return hex.EncodeToString(crypto.Hash(mail))
+}
+
+func (c *Notification) performMailNotification(mail []byte, sentMails services.SortedSet) error {
+	mailAddress := string(mail)
+	err := sendMail(mailAddress, c.settings.Mail)
+	if err != nil {
+		return err
+	} else {
+		marshal, err := c.encryptAndSerialize(c.hashMail(mail))
+		if err != nil {
+			return err
+		}
+		err = sentMails.Add(marshal, time.Now().Unix())
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (c *Notification) decryptMail(notification MailNotification, notificationsPrivateKey *ecdsa.PrivateKey) (mail []byte, err error) {
@@ -191,13 +259,20 @@ func (c *Notification) decryptMail(notification MailNotification, notificationsP
 }
 
 func (c *Notification) removeMail(context *jsonrpc.Context, params *removeMailParams) *jsonrpc.Response {
+	blockedMailsSet := c.getBlockedMailsSet()
 
-	mailAlreadyOnyBlockList, err := c.mailOnBlockList(params.Data)
+	blockedMailsSetMembers, err := blockedMailsSet.Members()
+	if err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+
+	mailAlreadyOnyBlockList, err := c.mailOnBlockList(params.Data, blockedMailsSetMembers)
 	if err != nil {
 		services.Log.Error(err)
 		return context.InternalError()
 	} else if !mailAlreadyOnyBlockList {
-		err = c.addRemovedMail(params.Data)
+		err = c.addBlockedMail(params.Data, blockedMailsSet)
 		if err != nil {
 			services.Log.Error(err)
 			return context.InternalError()
@@ -207,23 +282,21 @@ func (c *Notification) removeMail(context *jsonrpc.Context, params *removeMailPa
 	return context.Acknowledge()
 }
 
-func (c *Notification) getRemovedMailsSet() services.Set {
-	return c.db.Set("removedMails", []byte("mails"))
+func (c *Notification) getBlockedMailsSet() services.Set {
+	return c.db.Set("notifications", []byte("removedMails"))
 }
 
-func (c *Notification) addRemovedMail(mailHashToRemove string) error {
-	removedMails := c.getRemovedMailsSet()
-	encrypt, err := crypto.Encrypt([]byte(mailHashToRemove), c.settings.Secret)
+func (c *Notification) getSentMailsSet() services.SortedSet {
+	return c.db.SortedSet("notifications", []byte("sentMails"))
+}
+
+func (c *Notification) addBlockedMail(mailHashToAdd string, blockedMailsSet services.Set) error {
+	marshal, err := c.encryptAndSerialize(mailHashToAdd)
 	if err != nil {
 		return err
 	}
 
-	marshal, err := json.Marshal(encrypt)
-	if err != nil {
-		return err
-	}
-
-	err = removedMails.Add(marshal)
+	err = blockedMailsSet.Add(marshal)
 	if err != nil {
 		return err
 	}
@@ -231,15 +304,21 @@ func (c *Notification) addRemovedMail(mailHashToRemove string) error {
 	return nil
 }
 
-func (c *Notification) mailOnBlockList(mailHashToCheck string) (bool, error) {
-	removedMails := c.getRemovedMailsSet()
-
-	removedMailMembers, err := removedMails.Members()
+func (c *Notification) encryptAndSerialize(mailHashToAdd string) ([]byte, error) {
+	encrypt, err := crypto.Encrypt([]byte(mailHashToAdd), c.settings.Secret)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 
-	for _, member := range removedMailMembers {
+	marshal, err := json.Marshal(encrypt)
+	if err != nil {
+		return nil, err
+	}
+	return marshal, err
+}
+
+func (c *Notification) mailOnBlockList(mailHashToCheck string, blockList []*services.SetEntry) (bool, error) {
+	for _, member := range blockList {
 		var encryptedMailHash *crypto.EncryptedData
 		err := json.Unmarshal(member.Data, &encryptedMailHash)
 		if err != nil {
@@ -257,7 +336,39 @@ func (c *Notification) mailOnBlockList(mailHashToCheck string) (bool, error) {
 	return false, nil
 }
 
-func sendMail(mail string, mailSettings *services.MailSettings) {
+func (c *Notification) recentlyNotified(mail string, recentlyNotifiedMails []*services.SortedSetEntry) (bool, error) {
+	for _, notifiedMail := range recentlyNotifiedMails {
+		var encryptedMailHash *crypto.EncryptedData
+		err := json.Unmarshal(notifiedMail.Data, &encryptedMailHash)
+		if err != nil {
+			return false, err
+		}
+		decryptedMailHash, err := crypto.Decrypt(encryptedMailHash, c.settings.Secret)
+		if err != nil {
+			return false, err
+		}
+
+		if string(decryptedMailHash) == mail {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+func (c *Notification) recentlyNotifiedHousekeeping() {
+	err := c.getSentMailsSet().RemoveRangeByScore(0, c.getMailingThresholdInSeconds()-1)
+	if err != nil {
+		services.Log.Error(err)
+	}
+}
+
+func (c *Notification) getMailingThresholdInSeconds() int64 {
+	delayInSeconds := c.settings.Mail.MailDelay * 60
+	return time.Now().Unix() - delayInSeconds
+}
+
+func sendMail(mail string, mailSettings *services.MailSettings) error {
 	// Set up authentication information.
 	auth := smtp.PlainAuth("", mailSettings.SmtpUser, mailSettings.SmtpPassword, mailSettings.SmtpHost)
 
@@ -276,7 +387,10 @@ func sendMail(mail string, mailSettings *services.MailSettings) {
 		mailSettings.Sender,
 		to,
 		[]byte(msg))
+
 	if err != nil {
-		services.Log.Error(err)
+		return err
 	}
+
+	return nil
 }

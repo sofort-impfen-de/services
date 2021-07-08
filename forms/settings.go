@@ -169,6 +169,12 @@ var MailForm = forms.Form{
 				forms.IsString{},
 			},
 		},
+		{
+			Name: "mail_delay",
+			Validators: []forms.Validator{
+				forms.IsInteger{},
+			},
+		},
 	},
 }
 

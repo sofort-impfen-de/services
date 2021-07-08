@@ -73,6 +73,7 @@ notification:
     smtp_password: "test"
     sender: "test@sofort-impfen.de"
     mail_subject: "Neue Impftermine verfügbar!"
+    mail_delay: 1
     mail_template: >
       <html>
         <h1>This is a test mail</h1>

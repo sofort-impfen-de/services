@@ -137,4 +137,5 @@ type MailSettings struct {
 	Sender       string `json:"sender"`
 	MailSubject  string `json:"mail_subject"`
 	MailTemplate string `json:"mail_template"`
+	MailDelay    int64  `json:"mail_delay"`
 }
