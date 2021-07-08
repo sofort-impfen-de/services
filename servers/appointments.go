@@ -105,6 +105,10 @@ func MakeAppointments(settings *services.Settings) (*Appointments, error) {
 			Form:    &GetBookedAppointmentsForm,
 			Handler: Appointments.getBookedAppointments,
 		},
+		"cancelBooking": {
+			Form:    &CancelBookingForm,
+			Handler: Appointments.cancelBooking,
+		},
 		"bookSlot": {
 			Form:    &BookSlotForm,
 			Handler: Appointments.bookSlot,
@@ -3385,11 +3389,40 @@ func (c *Appointments) publishAppointments(context *jsonrpc.Context, params *Pub
 		return context.InternalError()
 	}
 
+	bookings := c.db.Map("bookings", hash)
+	allBookings, err := bookings.GetAll()
+
+	if err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+
 	for _, appointment := range params.Data.Offers {
+		for _, slot := range appointment.Data.SlotData {
+			delete(allBookings, string(slot.ID))
+		}
 		if jsonData, err := json.Marshal(appointment); err != nil {
 			services.Log.Error(err)
 			return context.InternalError()
 		} else if err := appointments.Set(appointment.Data.ID, jsonData); err != nil {
+			services.Log.Error(err)
+			return context.InternalError()
+		}
+	}
+
+	usedTokens := transaction.Set("bookings", []byte("tokens"))
+	// we delete all bookings for slots that have been removed by the provider
+	for k, data := range allBookings {
+
+		existingBooking := &Booking{}
+
+		if err := json.Unmarshal(data, &existingBooking); err != nil {
+			services.Log.Error(err)
+		} else if err := usedTokens.Del(existingBooking.Token); err != nil {
+			services.Log.Error(err)
+		}
+
+		if err := bookings.Del([]byte(k)); err != nil {
 			services.Log.Error(err)
 			return context.InternalError()
 		}
@@ -3400,6 +3433,16 @@ func (c *Appointments) publishAppointments(context *jsonrpc.Context, params *Pub
 	return context.Acknowledge()
 }
 
+var GetBookedAppointmentsDataForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "timestamp",
+			Validators: []forms.Validator{
+				forms.IsTime{Format: "rfc3339"},
+			},
+		},
+	},
+}
 var GetBookedAppointmentsForm = forms.Form{
 	Fields: []forms.Field{
 		{
@@ -3410,7 +3453,7 @@ var GetBookedAppointmentsForm = forms.Form{
 					Key: "json",
 				},
 				forms.IsStringMap{
-					Form: &PublishAppointmentsDataForm,
+					Form: &GetBookedAppointmentsDataForm,
 				},
 			},
 		},
@@ -3493,6 +3536,106 @@ func (c *Appointments) getBookedAppointments(context *jsonrpc.Context, params *G
 	}
 
 	return context.Result(bookingsList)
+}
+
+var CancelBookingDataForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "timestamp",
+			Validators: []forms.Validator{
+				forms.IsTime{Format: "rfc3339"},
+			},
+		},
+		{
+			Name: "id",
+			Validators: []forms.Validator{
+				ID,
+			},
+		},
+	},
+}
+var CancelBookingForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "data",
+			Validators: []forms.Validator{
+				forms.IsString{},
+				JSON{
+					Key: "json",
+				},
+				forms.IsStringMap{
+					Form: &CancelBookingDataForm,
+				},
+			},
+		},
+		{
+			Name: "signature",
+			Validators: []forms.Validator{
+				forms.IsBytes{
+					Encoding:  "base64",
+					MaxLength: 1000,
+					MinLength: 50,
+				},
+			},
+		},
+		{
+			Name: "publicKey",
+			Validators: []forms.Validator{
+				forms.IsOptional{},
+				forms.IsBytes{
+					Encoding:  "base64",
+					MaxLength: 1000,
+					MinLength: 50,
+				},
+			},
+		},
+	},
+}
+
+type CancelBookingParams struct {
+	JSON      string             `json:"json"`
+	Data      *CancelBookingData `json:"data"`
+	Signature []byte             `json:"signature"`
+	PublicKey []byte             `json:"publicKey"`
+}
+
+type CancelBookingData struct {
+	Timestamp *time.Time `json:"timestamp"`
+	ID        []byte     `json:"id"`
+}
+
+func (c *Appointments) cancelBooking(context *jsonrpc.Context, params *CancelBookingParams) *jsonrpc.Response {
+
+	// make sure this is a valid provider asking for tokens
+	resp, providerKey := c.isProvider(context, []byte(params.JSON), params.Signature, params.PublicKey)
+
+	if resp != nil {
+		return resp
+	}
+
+	if expired(params.Data.Timestamp) {
+		return context.Error(410, "signature expired", nil)
+	}
+
+	pkd, err := providerKey.ProviderKeyData()
+
+	if err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+
+	// the provider "ID" is the hash of the signing key
+	hash := crypto.Hash(pkd.Signing)
+
+	bookings := c.db.Map("bookings", hash)
+
+	if err := bookings.Del(params.Data.ID); err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+
+	return context.Acknowledge()
+
 }
 
 var BookSlotForm = forms.Form{
@@ -3592,6 +3735,7 @@ type BookSlotData struct {
 type Booking struct {
 	ID            []byte                      `json:"id"`
 	PublicKey     []byte                      `json:"publicKey"`
+	Token         []byte                      `json:"token"`
 	EncryptedData *services.ECDHEncryptedData `json:"encryptedData"`
 }
 
@@ -3632,11 +3776,6 @@ func (c *Appointments) bookSlot(context *jsonrpc.Context, params *BookSlotParams
 		return context.InternalError()
 	} else if ok {
 		return notAuthorized
-	}
-
-	if err := usedTokens.Add(token); err != nil {
-		services.Log.Error(err)
-		return context.InternalError()
 	}
 
 	// we verify the signature (without veryfing e.g. the provenance of the key)
@@ -3712,6 +3851,7 @@ findAppointment:
 	booking := &Booking{
 		PublicKey:     params.PublicKey,
 		ID:            params.Data.ID,
+		Token:         token,
 		EncryptedData: params.Data.EncryptedData,
 	}
 
@@ -3719,6 +3859,11 @@ findAppointment:
 		services.Log.Error(err)
 		return context.InternalError()
 	} else if err := bookings.Set(params.Data.ID, data); err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+
+	if err := usedTokens.Add(token); err != nil {
 		services.Log.Error(err)
 		return context.InternalError()
 	}
@@ -3827,10 +3972,11 @@ func (c *Appointments) cancelSlot(context *jsonrpc.Context, params *CancelSlotPa
 	existingBooking := &Booking{}
 
 	if existingBookingData, err := bookings.Get(params.Data.ID); err != nil {
-		if err != databases.NotFound {
-			services.Log.Error(err)
-			return context.InternalError()
+		if err == databases.NotFound {
+			return context.NotFound()
 		}
+		services.Log.Error(err)
+		return context.InternalError()
 	} else if err := json.Unmarshal(existingBookingData, &existingBooking); err != nil {
 		services.Log.Error(err)
 		return context.InternalError()
