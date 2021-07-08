@@ -2774,6 +2774,10 @@ func (c *Appointments) getAppointmentsByZipCode(context *jsonrpc.Context, params
 			bookedSlots = append(bookedSlots, []byte(k))
 		}
 
+		if len(appointments) == 0 {
+			continue
+		}
+
 		providerAppointments := &ProviderAppointments{
 			Provider: providerData,
 			Offers:   appointments,
