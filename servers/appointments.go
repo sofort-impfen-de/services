@@ -30,7 +30,6 @@ import (
 	kbForms "github.com/kiebitz-oss/services/forms"
 	"github.com/kiebitz-oss/services/jsonrpc"
 	"github.com/kiprotect/go-helpers/forms"
-	"math"
 	"regexp"
 	"sort"
 	"strings"
@@ -140,10 +139,6 @@ func MakeAppointments(settings *services.Settings) (*Appointments, error) {
 		"getToken": {
 			Form:    &GetTokenForm,
 			Handler: Appointments.getToken,
-		},
-		"getQueueTokens": {
-			Form:    &GetQueueTokensForm,
-			Handler: Appointments.getQueueTokens,
 		},
 		"storeProviderData": {
 			Form:    &StoreProviderDataForm,
@@ -2509,13 +2504,9 @@ var TokenDataForm = forms.Form{
 }
 
 type GetTokenParams struct {
-	Hash            []byte                      `json:"hash"`
-	EncryptedData   *services.ECDHEncryptedData `json:"encryptedData"`
-	QueueID         []byte                      `json:"queueID"`
-	Code            []byte                      `json:"code"`
-	PublicKey       []byte                      `json:"publicKey"`
-	QueueData       *TokenQueueData             `json:"queueData"`
-	SignedTokenData *SignedTokenData            `json:"signedTokenData"`
+	Hash      []byte `json:"hash"`
+	Code      []byte `json:"code"`
+	PublicKey []byte `json:"publicKey"`
 }
 
 type SignedTokenData struct {
@@ -2531,35 +2522,9 @@ type TokenData struct {
 	Hash      []byte `json:"hash"`
 }
 
-type QueueToken struct {
-	Token         []byte                      `json:"token"`
-	Queue         []byte                      `json:"queue"`
-	Position      int64                       `json:"position"`
-	QueueData     *TokenQueueData             `json:"queueData"`
-	EncryptedData *services.ECDHEncryptedData `json:"encryptedData"`
-}
-
-type TokenQueueData struct {
-	ZipCode       string `json:"zipCode"`
-	Accessible    bool   `json:"accessible"`
-	Distance      int64  `json:"distance"`
-	OfferReceived bool   `json:"offerReceived"`
-	OfferAccepted bool   `json:"offerAccepted"`
-}
-
 //{hash, encryptedData, queueID, queueData, signedTokenData}
 // get a token for a given queue
 func (c *Appointments) getToken(context *jsonrpc.Context, params *GetTokenParams) *jsonrpc.Response {
-
-	success := false
-	transaction, finalize, err := c.transaction(&success)
-
-	if err != nil {
-		services.Log.Error(err)
-		return context.InternalError()
-	}
-
-	defer finalize()
 
 	codes := c.db.Set("codes", []byte("user"))
 	codeScores := c.db.SortedSet("codeScores", []byte("user"))
@@ -2570,220 +2535,64 @@ func (c *Appointments) getToken(context *jsonrpc.Context, params *GetTokenParams
 		return context.InternalError()
 	}
 
-	tokenQueuesMap := transaction.Map("tokens", []byte("queues"))
-	tokenDataMap := transaction.Map("tokens", []byte("data"))
-	queuedTokensSet := transaction.SortedSet("tokens::queued", params.QueueID)
-	activeTokensSet := transaction.SortedSet("tokens", []byte("active"))
-
-	var queueToken *QueueToken
 	var signedData *crypto.SignedStringData
 
-	// this is an update call
-	if params.SignedTokenData != nil {
-
-		services.Log.Debug("Updating token...")
-
-		signedData = &crypto.SignedStringData{
-			Data:      params.SignedTokenData.JSON,
-			Signature: params.SignedTokenData.Signature,
+	// this is a new token
+	if c.settings.UserCodesEnabled {
+		notAuthorized := context.Error(401, "not authorized", nil)
+		if params.Code == nil {
+			return notAuthorized
 		}
-		if ok, err := tokenKey.VerifyString(signedData); err != nil {
-			services.Log.Error(err)
+		if ok, err := codes.Has(params.Code); err != nil {
+			services.Log.Error()
 			return context.InternalError()
 		} else if !ok {
-			return context.Error(400, "invalid signature", nil)
+			return notAuthorized
 		}
-		// we retrieve the queue data
-		qd, err := tokenDataMap.Get(params.SignedTokenData.Data.Token)
+	}
+
+	if _, token, err := c.priorityToken(); err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	} else {
+		tokenData := &TokenData{
+			Hash:      params.Hash,
+			Token:     token,
+			PublicKey: params.PublicKey,
+		}
+
+		td, err := json.Marshal(tokenData)
+
 		if err != nil {
-			if err == databases.NotFound {
-				return context.NotFound()
-			}
 			services.Log.Error(err)
 			return context.InternalError()
 		}
 
-		if err := json.Unmarshal(qd, &queueToken); err != nil {
+		if signedData, err = tokenKey.SignString(string(td)); err != nil {
 			services.Log.Error(err)
 			return context.InternalError()
 		}
+	}
 
-		// we retrieve the queue ID
-		queueID, err := tokenQueuesMap.Get(params.SignedTokenData.Data.Token)
+	// if this is a new token we delete the user code
+	if c.settings.UserCodesEnabled {
+		score, err := codeScores.Score(params.Code)
 		if err != nil && err != databases.NotFound {
 			services.Log.Error(err)
 			return context.InternalError()
 		}
 
-		if queueID != nil {
+		score += 1
 
-			oldQueuedTokensSet := transaction.SortedSet("tokens::queued", queueID)
-
-			// we delete the token from the old queue
-			if ok, err := oldQueuedTokensSet.Del(qd); err != nil {
-				services.Log.Error(err)
-				return context.InternalError()
-			} else if !ok {
-				// the token isn't in the queue anymore
-				return context.NotFound()
-			}
-
-			// we delete the token from the old queues map
-			if err := tokenQueuesMap.Del(params.SignedTokenData.Data.Token); err != nil {
+		if score > c.settings.UserCodesReuseLimit {
+			if err := codes.Del(params.Code); err != nil {
 				services.Log.Error(err)
 				return context.InternalError()
 			}
-
-		}
-
-		// we delete the token from the old token data map
-		if err := tokenDataMap.Del(params.SignedTokenData.Data.Token); err != nil && err != databases.NotFound {
+		} else if err := codeScores.Add(params.Code, score); err != nil {
 			services.Log.Error(err)
 			return context.InternalError()
 		}
-
-		// we update the queue data and the encrypted data
-		queueToken.QueueData = params.QueueData
-		queueToken.EncryptedData = params.EncryptedData
-
-	} else {
-
-		// this is a new token
-		if c.settings.UserCodesEnabled {
-			notAuthorized := context.Error(401, "not authorized", nil)
-			if params.Code == nil {
-				return notAuthorized
-			}
-			if ok, err := codes.Has(params.Code); err != nil {
-				services.Log.Error()
-				return context.InternalError()
-			} else if !ok {
-				return notAuthorized
-			}
-		}
-
-		if intToken, token, err := c.priorityToken(); err != nil {
-			services.Log.Error(err)
-			return context.InternalError()
-		} else {
-			tokenData := &TokenData{
-				Hash:      params.Hash,
-				Token:     token,
-				PublicKey: params.PublicKey,
-			}
-
-			td, err := json.Marshal(tokenData)
-
-			if err != nil {
-				services.Log.Error(err)
-				return context.InternalError()
-			}
-
-			if signedData, err = tokenKey.SignString(string(td)); err != nil {
-				services.Log.Error(err)
-				return context.InternalError()
-			} else {
-				queueToken = &QueueToken{
-					Position:      int64(intToken),
-					Token:         token,
-					QueueData:     params.QueueData,
-					EncryptedData: params.EncryptedData,
-				}
-			}
-		}
-	}
-
-	// we add the current unix nanosecond time to the score, so that tokens which are
-	// active will always be preferred to inactive ones...
-	now := time.Now().UnixNano()
-
-	// we store the new or updated queue token in the given queue
-	qd, err := json.Marshal(queueToken)
-	if err != nil {
-		services.Log.Error(err)
-		return context.InternalError()
-	}
-
-	// we remember which queue this token is in
-	if err := tokenQueuesMap.Set(queueToken.Token, params.QueueID); err != nil {
-		services.Log.Error(err)
-		return context.InternalError()
-	}
-
-	// we remember the value of the token data
-	if err := tokenDataMap.Set(queueToken.Token, qd); err != nil {
-		services.Log.Error(err)
-		return context.InternalError()
-	}
-
-	// active tokens get a bonus
-	if err := queuedTokensSet.Add(qd, queueToken.Position-now); err != nil {
-		services.Log.Error(err)
-		return context.InternalError()
-	}
-
-	// we keep a list of active tokens so that we can delete inactive ones...
-	if err := activeTokensSet.Add(qd, now); err != nil {
-		services.Log.Error(err)
-		return context.InternalError()
-	}
-
-	if params.SignedTokenData == nil {
-		// if this is a new token we delete the user code
-		if c.settings.UserCodesEnabled {
-			score, err := codeScores.Score(params.Code)
-			if err != nil && err != databases.NotFound {
-				services.Log.Error(err)
-				return context.InternalError()
-			}
-
-			score += 1
-
-			if score > c.settings.UserCodesReuseLimit {
-				if err := codes.Del(params.Code); err != nil {
-					services.Log.Error(err)
-					return context.InternalError()
-				}
-			} else if err := codeScores.Add(params.Code, score); err != nil {
-				services.Log.Error(err)
-				return context.InternalError()
-			}
-		}
-	}
-
-	if c.meter != nil {
-		// we generate the UID of the provider, which is the hash of its public key
-		uid := crypto.Hash(queueToken.Token)
-		hexUID := hex.EncodeToString(uid)
-		data := map[string]string{
-			"zipCode": queueToken.QueueData.ZipCode,
-		}
-
-		for _, twt := range tws {
-
-			// generate the time window
-			tw := twt(now)
-
-			// we add the info that this token is active
-			if err := c.meter.AddOnce("tokens", "active", hexUID, data, tw, 1); err != nil {
-				services.Log.Error(err)
-				continue
-			}
-
-			// we add the info that this token is active (without the zip code)
-			if err := c.meter.AddOnce("tokens", "active", hexUID, nil, tw, 1); err != nil {
-				services.Log.Error(err)
-				continue
-			}
-
-		}
-
-	}
-
-	success = true
-
-	if params.SignedTokenData != nil {
-		return context.Acknowledge()
 	}
 
 	return context.Result(signedData)
@@ -2791,151 +2600,6 @@ func (c *Appointments) getToken(context *jsonrpc.Context, params *GetTokenParams
 }
 
 // provider-only endpoints
-
-var GetQueueTokensForm = forms.Form{
-	Fields: []forms.Field{
-		{
-			Name: "data",
-			Validators: []forms.Validator{
-				forms.IsString{},
-				JSON{
-					Key: "json",
-				},
-				forms.IsStringMap{
-					Form: &GetQueueTokensDataForm,
-				},
-			},
-		},
-		{
-			Name: "signature",
-			Validators: []forms.Validator{
-				forms.IsBytes{
-					Encoding:  "base64",
-					MaxLength: 1000,
-					MinLength: 50,
-				},
-			},
-		},
-		{
-			Name: "publicKey",
-			Validators: []forms.Validator{
-				forms.IsOptional{},
-				forms.IsBytes{
-					Encoding:  "base64",
-					MaxLength: 1000,
-					MinLength: 50,
-				},
-			},
-		},
-	},
-}
-
-var GetQueueTokensDataForm = forms.Form{
-	Fields: []forms.Field{
-		{
-			Name: "capacities",
-			Validators: []forms.Validator{
-				forms.IsList{
-					Validators: []forms.Validator{
-						forms.IsStringMap{
-							Form: &CapacityForm,
-						},
-					},
-				},
-			},
-		},
-		{
-			Name: "expiration",
-			Validators: []forms.Validator{
-				forms.IsInteger{
-					HasMin: true,
-					Min:    60,
-					HasMax: true,
-					Max:    60 * 60 * 24,
-				},
-			},
-		},
-	},
-}
-
-var CapacityForm = forms.Form{
-	Fields: []forms.Field{
-		{
-			Name: "n",
-			Validators: []forms.Validator{
-				forms.IsInteger{
-					HasMin: true,
-					Min:    0,
-				},
-			},
-		},
-		{
-			Name: "open",
-			Validators: []forms.Validator{
-				forms.IsInteger{
-					HasMin: true,
-					Min:    0,
-				},
-			},
-		},
-		{
-			Name: "booked",
-			Validators: []forms.Validator{
-				forms.IsInteger{
-					HasMin: true,
-					Min:    0,
-				},
-			},
-		},
-		{
-			Name: "bookings",
-			Validators: []forms.Validator{
-				forms.IsOptional{Default: 0},
-				forms.IsInteger{
-					HasMin: true,
-					Min:    0,
-				},
-			},
-		},
-		{
-			Name: "tokens",
-			Validators: []forms.Validator{
-				forms.IsOptional{Default: 0},
-				forms.IsInteger{
-					HasMin: true,
-					Min:    0,
-				},
-			},
-		},
-		{
-			Name: "properties",
-			Validators: []forms.Validator{
-				forms.IsStringMap{},
-			},
-		},
-	},
-}
-
-type GetQueueTokensParams struct {
-	JSON      string              `json:"json"`
-	Data      *GetQueueTokensData `json:"data"`
-	Signature []byte              `json:"signature"`
-	PublicKey []byte              `json:"publicKey"`
-}
-
-type GetQueueTokensData struct {
-	Capacities []*Capacity `json:"capacities"`
-	Expiration int64       `json:"expiration"`
-}
-
-type Capacity struct {
-	N          int64                  `json:"n"`
-	Tokens     int64                  `json:"tokens"`
-	Open       int64                  `json:"open"`
-	Booked     int64                  `json:"booked"`
-	Bookings   int64                  `json:"bookings"`
-	Properties map[string]interface{} `json:"properties"`
-}
 
 var tws = []services.TimeWindowFunc{
 	services.Minute,
@@ -3379,6 +3043,7 @@ func (c *Appointments) publishAppointments(context *jsonrpc.Context, params *Pub
 
 	// the provider "ID" is the hash of the signing key
 	hash := crypto.Hash(pkd.Signing)
+	hexUID := hex.EncodeToString(hash)
 
 	// appointments are stored in a provider-specific key
 	appointments := transaction.Map("appointments", hash)
@@ -3397,8 +3062,15 @@ func (c *Appointments) publishAppointments(context *jsonrpc.Context, params *Pub
 		return context.InternalError()
 	}
 
+	var bookedSlots, openSlots int64
+
 	for _, appointment := range params.Data.Offers {
 		for _, slot := range appointment.Data.SlotData {
+			if _, ok := allBookings[string(slot.ID)]; ok {
+				bookedSlots += 1
+			} else {
+				openSlots += 1
+			}
 			delete(allBookings, string(slot.ID))
 		}
 		if jsonData, err := json.Marshal(appointment); err != nil {
@@ -3429,6 +3101,47 @@ func (c *Appointments) publishAppointments(context *jsonrpc.Context, params *Pub
 	}
 
 	success = true
+
+	if c.meter != nil {
+
+		now := time.Now().UTC().UnixNano()
+
+		addTokenStats := func(tw services.TimeWindow, data map[string]string) error {
+			// we add the maximum of the open appointments
+			if err := c.meter.AddMax("queues", "open", hexUID, data, tw, openSlots); err != nil {
+				return err
+			}
+			// we add the maximum of the booked appointments
+			if err := c.meter.AddMax("queues", "booked", hexUID, data, tw, bookedSlots); err != nil {
+				return err
+			}
+			// we add the info that this provider is active
+			if err := c.meter.AddOnce("queues", "active", hexUID, data, tw, 1); err != nil {
+				return err
+			}
+			return nil
+		}
+
+		for _, twt := range tws {
+
+			// generate the time window
+			tw := twt(now)
+
+			// global statistics
+			if err := addTokenStats(tw, map[string]string{}); err != nil {
+				services.Log.Error(err)
+			}
+
+			// statistics by zip code
+			if err := addTokenStats(tw, map[string]string{
+				"zipCode": pkd.QueueData.ZipCode,
+			}); err != nil {
+				services.Log.Error(err)
+			}
+
+		}
+
+	}
 
 	return context.Acknowledge()
 }
@@ -3868,6 +3581,24 @@ findAppointment:
 		return context.InternalError()
 	}
 
+	if c.meter != nil {
+
+		now := time.Now().UTC().UnixNano()
+
+		for _, twt := range tws {
+
+			// generate the time window
+			tw := twt(now)
+
+			// we add the info that a booking was made
+			if err := c.meter.Add("queues", "bookings", map[string]string{}, tw, 1); err != nil {
+				services.Log.Error(err)
+			}
+
+		}
+
+	}
+
 	return context.Acknowledge()
 
 }
@@ -4022,225 +3753,17 @@ func (c *Appointments) cancelSlot(context *jsonrpc.Context, params *CancelSlotPa
 		return context.InternalError()
 	}
 
-	return context.Acknowledge()
-
-}
-
-// { capacities }, keyPair
-// get n tokens from the given queue IDs
-func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueueTokensParams) *jsonrpc.Response {
-
-	// make sure this is a valid provider asking for tokens
-	resp, providerKey := c.isProvider(context, []byte(params.JSON), params.Signature, params.PublicKey)
-
-	if resp != nil {
-		return resp
-	}
-
-	// we generate the UID of the provider, which is the hash of its public key
-	uid := crypto.Hash(params.PublicKey)
-	hexUID := hex.EncodeToString(uid)
-
-	allTokens := [][]*QueueToken{}
-
-	pkd, err := providerKey.ProviderKeyData()
-
-	if err != nil {
-		services.Log.Error(err)
-		return context.InternalError()
-	}
-
-	queuePositions := map[string]int64{}
-
-	for _, queueID := range pkd.Queues {
-		queuePositions[string(queueID)] = 0
-	}
-
-	// we remember which tokens a given provider received
-	sss := c.db.SortedSet("tokens::received", uid)
-
-	if err := c.db.Expire("tokens::received", uid, time.Hour*24*14); err != nil {
-		services.Log.Error(err)
-		return context.InternalError()
-	}
-
-	var totalCapacity, totalTokens, totalOpen, totalOpenTokens, totalBooked, totalBookings int64
-	// to do: better balancing and check queue data
-	for _, capacity := range params.Data.Capacities {
-		totalCapacity += capacity.N
-		totalOpen += capacity.Open
-		totalOpenTokens += capacity.Tokens
-		totalBooked += capacity.Booked
-		totalBookings += capacity.Bookings
-		tokens := []*QueueToken{}
-		for len(tokens) < int(capacity.N) {
-			noMoreTokens := true
-			for _, queueID := range pkd.Queues {
-
-				position := queuePositions[string(queueID)]
-
-				if position > 1000 || position == -1 {
-					// we only look at the first 1000 (most active) tokens...
-					continue
-				}
-
-				ssq := c.db.SortedSet("tokens::queued", []byte(queueID))
-
-				// we retrieve the token at the current position, without
-				// removing it from the queue...
-				entry, err := ssq.At(position)
-				queuePositions[string(queueID)] = position + 1
-
-				if err != nil {
-					services.Log.Debugf("No more entries at position %d", position-1)
-					if err != databases.NotFound {
-						services.Log.Error(err)
-					}
-					queuePositions[string(queueID)] = -1
-					continue
-				}
-
-				services.Log.Debugf("Got an entry at position %d (score: %d)", position-1, entry.Score)
-				services.Log.Debugf(string(entry.Data))
-
-				noMoreTokens = false
-
-				var qt *QueueToken
-				if err := json.Unmarshal(entry.Data, &qt); err != nil {
-					continue
-				}
-
-				if qt.QueueData == nil {
-					qt.QueueData = &TokenQueueData{}
-				}
-
-				qt.Queue = queueID
-				match := true
-
-				// user isn't in the same zip code area, we check distances
-				if qt.QueueData.ZipCode != pkd.QueueData.ZipCode {
-					services.Log.Debugf("Getting distance between %s and %s", qt.QueueData.ZipCode, pkd.QueueData.ZipCode)
-					if distance, err := c.getDistance("zipCode", qt.QueueData.ZipCode, pkd.QueueData.ZipCode); err != nil {
-						if err != databases.NotFound {
-							services.Log.Error(err)
-						}
-						services.Log.Debugf("Distance not found")
-						match = false
-					} else {
-						services.Log.Debugf("Distance between %s and %s: %.2f (%.2f)", qt.QueueData.ZipCode, pkd.QueueData.ZipCode, distance, float64(qt.QueueData.Distance))
-						if distance > 2.0*float64(qt.QueueData.Distance) {
-							match = false
-						}
-					}
-				}
-
-				// user needs an accessible provider but this isn't the case
-				if qt.QueueData.Accessible && !pkd.QueueData.Accessible {
-					services.Log.Debugf("Accessibility not given...")
-					match = false
-				}
-
-				if !match {
-					continue
-				}
-
-				services.Log.Debugf("Found a match!")
-
-				score, err := sss.Score(entry.Data)
-
-				if err != nil {
-					if err != databases.NotFound {
-						services.Log.Error(err)
-						return context.InternalError()
-					}
-				} else if time.Now().Unix()-score < params.Data.Expiration {
-					services.Log.Info("Token was already given to provider...")
-					// this token was already given to the provider recently, so
-					// we do not return it anymore...
-					continue
-				}
-
-				// We add the token to the selected tokens for this queue
-				// If they don't get removed from the system we can queue
-				// them up again...
-				if err := sss.Add(entry.Data, time.Now().Unix()); err != nil {
-					services.Log.Error(err)
-				}
-
-				tokens = append(tokens, qt)
-			}
-			// no more tokens left it seems
-			if noMoreTokens {
-				break
-			}
-			// we return at most 100 tokens
-			if len(tokens) >= 200 {
-				break
-			}
-		}
-		totalTokens += int64(len(tokens))
-		allTokens = append(allTokens, tokens)
-
-		// we return at most 100 tokens in total
-		if totalTokens >= 200 {
-			break
-		}
-	}
-
 	if c.meter != nil {
 
 		now := time.Now().UTC().UnixNano()
-
-		addTokenStats := func(tw services.TimeWindow, data map[string]string) error {
-			// we add the number of tokens that were returned
-			if err := c.meter.Add("queues", "tokens", data, tw, totalTokens); err != nil {
-				return err
-			}
-			// we add the number of open tokens of the app
-			if err := c.meter.AddMax("queues", "openTokens", hexUID, data, tw, int64(math.Min(2000, float64(totalOpenTokens)))); err != nil {
-				return err
-			}
-			// we add the maximum of capacity that a given provider had
-			if err := c.meter.AddMax("queues", "capacities", hexUID, data, tw, int64(math.Min(100, float64(totalCapacity)))); err != nil {
-				return err
-			}
-			// we add the maximum of the open appointments
-			if err := c.meter.AddMax("queues", "open", hexUID, data, tw, int64(math.Min(1000, float64(totalOpen)))); err != nil {
-				return err
-			}
-			// we add the maximum of the booked appointments
-			if err := c.meter.AddMax("queues", "booked", hexUID, data, tw, int64(math.Min(1000, float64(totalBooked)))); err != nil {
-				return err
-			}
-			// we add the maximum of the booked appointments
-			if err := c.meter.Add("queues", "bookings", data, tw, int64(math.Min(1000, float64(totalBookings)))); err != nil {
-				return err
-			}
-			// we add the maximum of the difference between capacity and available tokens
-			if err := c.meter.AddMax("queues", "oversupply", hexUID, data, tw, int64(math.Min(100, float64(totalCapacity-totalTokens)))); err != nil {
-				return err
-			}
-			// we add the info that this provider is active
-			if err := c.meter.AddOnce("queues", "active", hexUID, data, tw, 1); err != nil {
-				return err
-			}
-			return nil
-		}
 
 		for _, twt := range tws {
 
 			// generate the time window
 			tw := twt(now)
 
-			// global statistics
-			if err := addTokenStats(tw, map[string]string{}); err != nil {
-				services.Log.Error(err)
-			}
-
-			// statistics by zip code
-			if err := addTokenStats(tw, map[string]string{
-				"zipCode": pkd.QueueData.ZipCode,
-			}); err != nil {
+			// we add the info that a booking was made
+			if err := c.meter.Add("queues", "cancellations", map[string]string{}, tw, 1); err != nil {
 				services.Log.Error(err)
 			}
 
@@ -4248,7 +3771,8 @@ func (c *Appointments) getQueueTokens(context *jsonrpc.Context, params *GetQueue
 
 	}
 
-	return context.Result(allTokens)
+	return context.Acknowledge()
+
 }
 
 var StoreProviderDataForm = forms.Form{
