@@ -2849,6 +2849,13 @@ var PublishAppointmentsDataForm = forms.Form{
 			},
 		},
 		{
+			Name: "reset",
+			Validators: []forms.Validator{
+				forms.IsOptional{Default: false},
+				forms.IsBoolean{},
+			},
+		},
+		{
 			Name: "offers",
 			Validators: []forms.Validator{
 				forms.IsList{
@@ -2992,6 +2999,7 @@ type PublishAppointmentsParams struct {
 type PublishAppointmentsData struct {
 	Timestamp *time.Time           `json:"timestamp"`
 	Offers    []*SignedAppointment `json:"offers"`
+	Reset     bool                 `json:"reset"`
 }
 
 type SignedAppointment struct {
@@ -3092,30 +3100,34 @@ func (c *Appointments) publishAppointments(context *jsonrpc.Context, params *Pub
 		}
 	}
 
-	// we delete appointments that are not referenced in the new data
-	for k, _ := range allAppointments {
-		if err := appointments.Del([]byte(k)); err != nil {
-			services.Log.Error(err)
-			return context.InternalError()
-		}
-	}
-
-	usedTokens := transaction.Set("bookings", []byte("tokens"))
-	// we delete all bookings for slots that have been removed by the provider
-	for k, data := range allBookings {
-
-		existingBooking := &Booking{}
-
-		if err := json.Unmarshal(data, &existingBooking); err != nil {
-			services.Log.Error(err)
-		} else if err := usedTokens.Del(existingBooking.Token); err != nil {
-			services.Log.Error(err)
+	if params.Data.Reset {
+		// we delete appointments that are not referenced in the new data
+		for k, _ := range allAppointments {
+			if err := appointments.Del([]byte(k)); err != nil {
+				services.Log.Error(err)
+				return context.InternalError()
+			}
 		}
 
-		if err := bookings.Del([]byte(k)); err != nil {
-			services.Log.Error(err)
-			return context.InternalError()
+		usedTokens := transaction.Set("bookings", []byte("tokens"))
+
+		// we delete all bookings for slots that have been removed by the provider
+		for k, data := range allBookings {
+
+			existingBooking := &Booking{}
+
+			if err := json.Unmarshal(data, &existingBooking); err != nil {
+				services.Log.Error(err)
+			} else if err := usedTokens.Del(existingBooking.Token); err != nil {
+				services.Log.Error(err)
+			}
+
+			if err := bookings.Del([]byte(k)); err != nil {
+				services.Log.Error(err)
+				return context.InternalError()
+			}
 		}
+
 	}
 
 	success = true
