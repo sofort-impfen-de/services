@@ -131,6 +131,11 @@ to generate these certificates, and then enable them by commenting out the `tls`
 
 ## Running
 
+Start redis:
+```bash
+docker run -d -p 6379:6379 redis
+```
+
 To run the development services we can then
 
 ```bash
@@ -140,6 +145,14 @@ kiebitz run appointments
 kiebitz run storage
 # ...or run all services
 kiebitz run all
+```
+
+### Notification service
+Start MailHog
+```bash
+echo "test:\$2a\$04\$qxRo.ftFoNep7ld/5jfKtuBTnGqff/fZVyj53mUC5sVf9dtDLAi/S" > /tmp/example-auth
+#pw: test
+docker run -d -p 1025:1025 -p 8025:8025 -v /tmp/example-auth:/example/example-auth mailhog/mailhog -auth-file=/example/example-auth
 ```
 
 ## Testing

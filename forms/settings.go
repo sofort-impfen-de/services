@@ -125,6 +125,59 @@ var MeterForm = forms.Form{
 	},
 }
 
+var MailForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "smtp_host",
+			Validators: []forms.Validator{
+				forms.IsString{},
+			},
+		},
+		{
+			Name: "smtp_port",
+			Validators: []forms.Validator{
+				forms.IsInteger{},
+			},
+		},
+		{
+			Name: "smtp_user",
+			Validators: []forms.Validator{
+				forms.IsString{},
+			},
+		},
+		{
+			Name: "smtp_password",
+			Validators: []forms.Validator{
+				forms.IsString{},
+			},
+		},
+		{
+			Name: "sender",
+			Validators: []forms.Validator{
+				forms.IsString{},
+			},
+		},
+		{
+			Name: "mail_subject",
+			Validators: []forms.Validator{
+				forms.IsString{},
+			},
+		},
+		{
+			Name: "mail_template",
+			Validators: []forms.Validator{
+				forms.IsString{},
+			},
+		},
+		{
+			Name: "mail_delay",
+			Validators: []forms.Validator{
+				forms.IsInteger{},
+			},
+		},
+	},
+}
+
 var StorageForm = forms.Form{
 	Fields: []forms.Field{
 		{
@@ -144,6 +197,49 @@ var StorageForm = forms.Form{
 					Min:    1,
 					HasMax: true,
 					Max:    60,
+				},
+			},
+		},
+	},
+}
+
+var NotificationForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "rpc",
+			Validators: []forms.Validator{
+				forms.IsStringMap{
+					Form: &JSONRPCServerSettingsForm,
+				},
+			},
+		},
+		{
+			Name: "secret",
+			Validators: []forms.Validator{
+				forms.IsBytes{
+					Encoding:  "base64",
+					MinLength: 16,
+					MaxLength: 64,
+				},
+			},
+		},
+		{
+			Name: "keys",
+			Validators: []forms.Validator{
+				forms.IsList{
+					Validators: []forms.Validator{
+						forms.IsStringMap{
+							Form: &KeyForm,
+						},
+					},
+				},
+			},
+		},
+		{
+			Name: "mail",
+			Validators: []forms.Validator{
+				forms.IsStringMap{
+					Form: &MailForm,
 				},
 			},
 		},
@@ -363,6 +459,15 @@ var SettingsForm = forms.Form{
 				forms.IsOptional{},
 				forms.IsStringMap{
 					Form: &AppointmentsForm,
+				},
+			},
+		},
+		{
+			Name: "notification",
+			Validators: []forms.Validator{
+				forms.IsOptional{},
+				forms.IsStringMap{
+					Form: &NotificationForm,
 				},
 			},
 		},

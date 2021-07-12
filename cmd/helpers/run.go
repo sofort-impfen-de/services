@@ -71,6 +71,14 @@ func initializeAppointments(settings *services.Settings) (Server, error) {
 	return helpers.InitializeAppointmentsServer(settings)
 }
 
+func initializeNotification(settings *services.Settings) (Server, error) {
+	services.Log.Debug("Starting notification server...")
+	if settings.Notification == nil {
+		return nil, fmt.Errorf("Notification settings undefined")
+	}
+	return helpers.InitializeNotificationServer(settings)
+}
+
 type Initializer func(settings *services.Settings) (Server, error)
 
 func startServer(settings *services.Settings, initializer Initializer) Server {
@@ -112,7 +120,7 @@ func Run(settings *services.Settings) ([]cli.Command, error) {
 					Name:   "all",
 					Flags:  []cli.Flag{},
 					Usage:  "Run all servers at once.",
-					Action: run(settings, []Initializer{initializeStorage, initializeAppointments}),
+					Action: run(settings, []Initializer{initializeStorage, initializeAppointments, initializeNotification}),
 				},
 				{
 					Name:   "storage",
@@ -125,6 +133,12 @@ func Run(settings *services.Settings) ([]cli.Command, error) {
 					Flags:  []cli.Flag{},
 					Usage:  "Run the appointments server.",
 					Action: run(settings, []Initializer{initializeAppointments}),
+				},
+				{
+					Name:   "notification",
+					Flags:  []cli.Flag{},
+					Usage:  "Run the notification server.",
+					Action: run(settings, []Initializer{initializeNotification}),
 				},
 			},
 		},

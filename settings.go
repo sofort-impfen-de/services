@@ -40,8 +40,19 @@ type AppointmentsSettings struct {
 	ProviderCodesReuseLimit int64                  `json:"provider_codes_reuse_limit"`
 }
 
+type NotificationSettings struct {
+	RPC    *JSONRPCServerSettings `json:"rpc"`
+	Mail   *MailSettings          `json:"mail"`
+	Secret []byte                 `json:"secret"`
+	Keys   []*crypto.Key          `json:"keys"`
+}
+
 func (a *AppointmentsSettings) Key(name string) *crypto.Key {
 	return key(a.Keys, name)
+}
+
+func (n *NotificationSettings) Key(name string) *crypto.Key {
+	return key(n.Keys, name)
 }
 
 func key(keys []*crypto.Key, name string) *crypto.Key {
@@ -76,6 +87,7 @@ type Settings struct {
 	Definitions  *Definitions          `json:"definitions,omitempty"`
 	Storage      *StorageSettings      `json:"storage,omitempty"`
 	Appointments *AppointmentsSettings `json:"appointments,omitempty"`
+	Notification *NotificationSettings `json:"notification"`
 	Database     *DatabaseSettings     `json:"database,omitempty"`
 	Meter        *MeterSettings        `json:"meter,omitempty"`
 	DatabaseObj  Database              `json:"-"`
@@ -115,4 +127,15 @@ type JSONRPCServerSettings struct {
 type HTTPServerSettings struct {
 	TLS         *TLSSettings `json:"tls,omitempty"`
 	BindAddress string       `json:"bind_address"`
+}
+
+type MailSettings struct {
+	SmtpHost     string `json:"smtp_host"`
+	SmtpPort     int64  `json:"smtp_port"`
+	SmtpUser     string `json:"smtp_user"`
+	SmtpPassword string `json:"smtp_password"`
+	Sender       string `json:"sender"`
+	MailSubject  string `json:"mail_subject"`
+	MailTemplate string `json:"mail_template"`
+	MailDelay    int64  `json:"mail_delay"`
 }

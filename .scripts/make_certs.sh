@@ -3,7 +3,7 @@
 
 # You can addd an entry to this list to generate a certificate for the given
 # actors.
-declare -a certs=("notifier-1" "storage-1" "appointments-1")
+declare -a certs=("notifier-1" "storage-1" "appointments-1" "notification-1")
 
 O="Kiebitz"
 ST="Berlin"
