@@ -2794,15 +2794,104 @@ func (c *Appointments) getAppointmentsByZipCode(context *jsonrpc.Context, params
 }
 
 var GetProviderAppointmentsForm = forms.Form{
-	Fields: []forms.Field{},
+	Fields: []forms.Field{
+		{
+			Name: "data",
+			Validators: []forms.Validator{
+				forms.IsString{},
+				JSON{
+					Key: "json",
+				},
+				forms.IsStringMap{
+					Form: &GetProviderAppointmentsDataForm,
+				},
+			},
+		},
+		{
+			Name: "signature",
+			Validators: []forms.Validator{
+				forms.IsBytes{
+					Encoding:  "base64",
+					MaxLength: 1000,
+					MinLength: 50,
+				},
+			},
+		},
+		{
+			Name: "publicKey",
+			Validators: []forms.Validator{
+				forms.IsOptional{},
+				forms.IsBytes{
+					Encoding:  "base64",
+					MaxLength: 1000,
+					MinLength: 50,
+				},
+			},
+		},
+	},
+}
+
+var GetProviderAppointmentsDataForm = forms.Form{
+	Fields: []forms.Field{
+		{
+			Name: "timestamp",
+			Validators: []forms.Validator{
+				forms.IsTime{Format: "rfc3339"},
+			},
+		},
+	},
 }
 
 type GetProviderAppointmentsParams struct {
-	ProviderID []byte `json:"providerID"`
+	JSON      string                       `json:"json"`
+	Data      *GetProviderAppointmentsData `json:"data"`
+	Signature []byte                       `json:"signature"`
+	PublicKey []byte                       `json:"publicKey"`
+}
+
+type GetProviderAppointmentsData struct {
+	Timestamp *time.Time `json:"timestamp"`
 }
 
 func (c *Appointments) getProviderAppointments(context *jsonrpc.Context, params *GetProviderAppointmentsParams) *jsonrpc.Response {
-	return context.Acknowledge()
+
+	// make sure this is a valid provider asking for tokens
+	resp, providerKey := c.isProvider(context, []byte(params.JSON), params.Signature, params.PublicKey)
+
+	if resp != nil {
+		return resp
+	}
+
+	if expired(params.Data.Timestamp) {
+		return context.Error(410, "signature expired", nil)
+	}
+
+	pkd, err := providerKey.ProviderKeyData()
+
+	if err != nil {
+		services.Log.Error(err)
+		return context.InternalError()
+	}
+
+	// the provider "ID" is the hash of the signing key
+	hash := crypto.Hash(pkd.Signing)
+
+	// appointments are stored in a provider-specific key
+	appointments := c.db.Map("appointments", hash)
+	allAppointments, err := appointments.GetAll()
+
+	signedAppointments := make([]*SignedAppointment, 0)
+
+	for _, appointment := range allAppointments {
+		var signedAppointment *SignedAppointment
+		if err := json.Unmarshal(appointment, &signedAppointment); err != nil {
+			services.Log.Error(err)
+			continue
+		}
+		signedAppointments = append(signedAppointments, signedAppointment)
+	}
+
+	return context.Result(signedAppointments)
 }
 
 var PublishAppointmentsForm = forms.Form{
