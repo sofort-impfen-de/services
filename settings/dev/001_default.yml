@@ -37,6 +37,7 @@ appointments:
   provider_codes_enabled: false
   user_codes_enabled: false
   keys: []
+  secret: MTIzNDU2Nzg5MTIzNDU2NDg5Cg==
   rpc:
     bind_address: localhost:8888
     cors:
@@ -47,3 +48,34 @@ appointments:
     #  ca_certificate_file: "$DIR/certs/root.crt"
     #  certificate_file: "$DIR/certs/appointments-1.crt"
     #  key_file: "$DIR/certs/appointments-1.key"
+notification:
+  rpc:
+    bind_address: localhost:7777
+    cors:
+      allowed_hosts: ["http://localhost:8080"]
+      allowed_headers: ["*"]
+      allowed_methods: ["POST"]
+  secret: c29mb3J0LWltcGZlbi5kZQ==
+  keys:
+    - name: "notifications"
+      type: "ecdh"
+      format: "spki-pkcs8"
+      params:
+        curve: "p-256"
+      public_key: "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEb9XkRMHqQCwd8n0vhcecokVdXcpOF6k8gYYhhREq07P2pYte/9QTjumPDyX1CHT/HmsuYEcinJxMsnuKhwjtxQ=="
+      purposes:
+          - "deriveKey"
+      private_key: "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg6S42Zzh9WgdPlKGug+qwpir/ZKKRHAx3Wz3w1cRrxpuhRANCAARv1eREwepALB3yfS+Fx5yiRV1dyk4XqTyBhiGFESrTs/ali17/1BOO6Y8PJfUIdP8eay5gRyKcnEyye4qHCO3F"
+  mail:
+    smtp_host: "localhost"
+    smtp_port: 1025
+    smtp_user: "test"
+    smtp_password: "test"
+    sender: "test@sofort-impfen.de"
+    mail_subject: "Neue Impftermine verfügbar!"
+    mail_delay: 1
+    mail_template: >
+      <html>
+        <h1>This is a test mail</h1>
+        <p>42</p>
+      </html>
