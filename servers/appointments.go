@@ -144,10 +144,6 @@ func MakeAppointments(settings *services.Settings) (*Appointments, error) {
 			Form:    &StoreProviderDataForm,
 			Handler: Appointments.storeProviderData,
 		},
-		"markTokenAsUsed": {
-			Form:    &MarkTokenAsUsedForm,
-			Handler: Appointments.markTokenAsUsed,
-		},
 		"getPendingProviderData": {
 			Form:    &GetPendingProviderDataForm,
 			Handler: Appointments.getPendingProviderData,
@@ -2656,10 +2652,11 @@ type SignedProviderData struct {
 }
 
 type ProviderData struct {
-	Name    string `json:"name"`
-	Street  string `json:"street"`
-	City    string `json:"city"`
-	ZipCode string `json:"zipCode"`
+	Name        string `json:"name"`
+	Street      string `json:"street"`
+	City        string `json:"city"`
+	ZipCode     string `json:"zipCode"`
+	Description string `json:"description"`
 }
 
 /*
@@ -2761,20 +2758,26 @@ func (c *Appointments) getAppointmentsByZipCode(context *jsonrpc.Context, params
 				services.Log.Error(err)
 				continue
 			}
-			if appointment.JSON == "" || appointment.PublicKey == nil || appointment.Signature == nil {
+
+			if err := json.Unmarshal([]byte(appointment.JSON), &appointment.Data); err != nil {
 				continue
 			}
+
+			if appointment.JSON == "" || appointment.PublicKey == nil || appointment.Signature == nil || appointment.Data == nil || appointment.Data.Timestamp.Before(time.Now()) {
+				continue
+			}
+
 			appointments = append(appointments, appointment)
+		}
+
+		if len(appointments) == 0 {
+			continue
 		}
 
 		bookedSlots := [][]byte{}
 
 		for k, _ := range allBookings {
 			bookedSlots = append(bookedSlots, []byte(k))
-		}
-
-		if len(appointments) == 0 {
-			continue
 		}
 
 		providerAppointments := &ProviderAppointments{
@@ -4005,34 +4008,6 @@ func (c *Appointments) storeProviderData(context *jsonrpc.Context, params *Store
 	success = true
 
 	return context.Acknowledge()
-}
-
-var MarkTokenAsUsedForm = forms.Form{
-	Fields: []forms.Field{
-		{
-			Name: "token",
-			Validators: []forms.Validator{
-				ID,
-			},
-		},
-		{
-			Name: "secret",
-			Validators: []forms.Validator{
-				ID,
-			},
-		},
-	},
-}
-
-type MarkTokenAsUsedParams struct {
-	Token  []byte `json:"token"`
-	Secret []byte `json:"secret"`
-}
-
-// mark a given token as used using its secret
-// { token, secret }, keyPair
-func (c *Appointments) markTokenAsUsed(context *jsonrpc.Context, params *MarkTokenAsUsedParams) *jsonrpc.Response {
-	return context.NotFound()
 }
 
 var GetPendingProviderDataForm = forms.Form{
