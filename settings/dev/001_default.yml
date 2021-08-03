@@ -4,14 +4,14 @@ meter:
   type: redis
   settings:
     addresses: ["localhost:6379"]
-    database: 3
+    database: 1
     password: ""
 database:
   name: db
   type: redis
   settings:
     addresses: ["localhost:6379"]
-    database: 2
+    database: 0
     password: ""
 storage:
   settings_ttl_days: 60
@@ -37,7 +37,6 @@ appointments:
   provider_codes_enabled: false
   user_codes_enabled: false
   keys: []
-  secret: MTIzNDU2Nzg5MTIzNDU2NDg5Cg==
   rpc:
     bind_address: localhost:8888
     cors:
@@ -55,17 +54,7 @@ notification:
       allowed_hosts: ["http://localhost:8080"]
       allowed_headers: ["*"]
       allowed_methods: ["POST"]
-  secret: c29mb3J0LWltcGZlbi5kZQ==
-  keys:
-    - name: "notifications"
-      type: "ecdh"
-      format: "spki-pkcs8"
-      params:
-        curve: "p-256"
-      public_key: "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEb9XkRMHqQCwd8n0vhcecokVdXcpOF6k8gYYhhREq07P2pYte/9QTjumPDyX1CHT/HmsuYEcinJxMsnuKhwjtxQ=="
-      purposes:
-          - "deriveKey"
-      private_key: "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg6S42Zzh9WgdPlKGug+qwpir/ZKKRHAx3Wz3w1cRrxpuhRANCAARv1eREwepALB3yfS+Fx5yiRV1dyk4XqTyBhiGFESrTs/ali17/1BOO6Y8PJfUIdP8eay5gRyKcnEyye4qHCO3F"
+  keys: []
   mail:
     smtp_host: "localhost"
     smtp_port: 1025
